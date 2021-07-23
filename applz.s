@@ -54,11 +54,7 @@ hires       =   $C057
 
             org $6000
 
-start       lda #180!$80        ;*** DUMMY ***
-            sta INTY_MOD+1
-            lda #1
-            sta DY_MOD+1
-
+start
             ; clear and display screen
 
             jsr clear1
@@ -115,8 +111,24 @@ update_loop lda #<applz_base
             sta appl_index
 
 :loop2      jsr update_appl
-            jsr erase_appl  ;*** make sure position changed
+
+            ; TODO: checking for movement probably not needed in real game
+
+            ldy #x_int
+            lda (appl),y
+            ldy #oldx_int
+            cmp (appl),y
+            bne :skip3
+
+            ldy #y_int
+            lda (appl),y
+            ldy #oldy_int
+            cmp (appl),y
+            beq :skip3
+
+:skip3      jsr erase_appl  ;*** make sure position changed
             jsr draw_appl
+:skip4
 
             lda appl
             clc
@@ -127,43 +139,13 @@ update_loop lda #<applz_base
 :skip2      dec appl_index
             bne :loop2
 
-;            lda #0
-;            sta $00
-;:delay0     ldy #0
-;:delay1     ldx #0
-;:delay2     pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            pha
-;            pla
-;            dex
-;            bne :delay2
-;            dey
-;            bne :delay1
-;            dec $00
-;            bne :delay0
-
             jmp update_loop
 
 *
 * choose initial position/movement for appl
 *
 init_appl   ldy #x_int
-            lda #0
-            eor #$80
+            lda #70
             sta (appl),y
 
             ldy #x_frac
@@ -171,8 +153,7 @@ init_appl   ldy #x_int
             sta (appl),y
 
             ldy #y_int
-INTY_MOD    lda #180          ;***187
-            eor #$80
+            lda #180
             sta (appl),y
 
             ldy #y_frac
@@ -184,15 +165,15 @@ INTY_MOD    lda #180          ;***187
             sta (appl),y
 
             ldy #dx_frac
-            lda #0
+            lda #128
             sta (appl),y
 
             ldy #dy_int
-DY_MOD      lda #1
+            lda #0
             sta (appl),y
 
             ldy #dy_frac
-            lda #0
+            lda #20
             sta (appl),y
 
             ldy #oldx_int
@@ -204,10 +185,10 @@ DY_MOD      lda #1
             sta (appl),y
 
             rts
-*
-* update appl position
-*
 
+;
+; update single appl position
+;
 update_appl ldy #x_frac
             lda (appl),y
             iny                 ; oldx_frac
@@ -225,8 +206,11 @@ update_appl ldy #x_frac
             adc (appl),y
             ldy #x_int
             sta (appl),y
-            bvc :skip1          ;*** reverse context ***
 
+            cmp #145-5     ;*** ball width
+            bcc :skip1          ;*** reverse context
+
+:reverse_x
             ; back up to old x
 
             ldy #oldx_frac
@@ -255,22 +239,23 @@ update_appl ldy #x_frac
 
             ldy #y_frac
             lda (appl),y
-            iny                 ; oldy_frac
+            ldy #oldy_frac
             sta (appl),y
             clc
-            iny                 ; dy_frac
+            ldy #dy_frac
             adc (appl),y
             ldy #y_frac
             sta (appl),y
             ldy #y_int
             lda (appl),y
-            iny                 ; oldy_int
+            ldy #oldy_int
             sta (appl),y
-            iny                 ; dy_int
+            ldy #dy_int
             adc (appl),y
-            bvs reverse_y
-;           cmp #187!128        ; TODO: check value
-;           bpl reverse_y
+
+            cmp #192-5      ;*** ball height
+            bcs reverse_y   ;*** also checks against 0
+
             ldy #y_int
             sta (appl),y
             ;*** reflection on top, kill on bottom ***
@@ -281,7 +266,7 @@ reverse_y
 
             ldy #oldy_frac
             lda (appl),y
-            dey                 ; y_frac
+            ldy #y_frac
             sta (appl),y
 
             ; negate dy
@@ -414,16 +399,6 @@ draw_block  stx grid_col
         fin
 :skip2      sta block_color
 
-;            lda grid_col
-;            lsr a
-;            lda #$d5
-;            bcc :skip2
-;            eor #$80
-;:skip2      cpx #block_type2
-;            bne :skip3
-;            eor #$7f
-;:skip3      sta block_color
-
             ; block_x = (grid_col * 3) + grid_screen_left
 
             lda grid_col
@@ -482,306 +457,25 @@ draw_block  stx grid_col
             bne :loop3
             rts
 
-
-            do 0    ;***
-
-;
-; y: block y
-; x: block x
-;
-draw_block
-            lda #0
-            sta block_index
-            lda #block_height+2
-            sta ypos
-            bne :skip1  ; always
-:loop1      lda ypos
-            clc
-            adc #block_height_2
-            sta ypos
-            lda block_index
-            clc
-            adc #blocks_wide
-            sta block_index
-:skip1      dey
-            bpl :loop1
-
-            txa
-            clc
-            adc block_index
-            sta block_index
-            lda #$55
-            bne :skip2  ; always
-:loop2      eor #$7f
-:skip2      dex
-            bpl :loop2
-            sta color
-
-            ldx #block_height
-
-:loop3      ldy ypos
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-
-
-            inc ypos
-            dex
-            bne :loop3
-
-
-draw_block
-            lda #0
-            sta block_index
-            lda #block_height+2
-            sta ypos
-
-            lda #blocks_high
-            sta block_row
-:loop1
-
-
-:loop2      ldx ypos
-            lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-
-
-
-            dec block_row
-            beq :loop1
-
-
-            ldx #block_height+2
-
-            lda #block_height
-            sta ypos
-
-:loop1      lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-
-            ldy #9
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            inx
-            dec ypos
-            beq :skip1
-            jmp :loop1
-:skip1
-
-            inx
-            inx
-
-            lda #6
-            sta xpos
-
-:loop2a     lda #block_height
-            sta ypos
-
-:loop2b     lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-
-            ldy #9
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$d5
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            lda #$55
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            eor #$7f
-            and #$9f
-            sta (screenl),y
-            iny
-
-            inx
-            dec ypos
-            beq :skip2b
-            jmp :loop2b
-:skip2b
-
-            inx
-            inx
-
-            dec xpos
-            beq :skip2a
-            jmp :loop2a
-:skip2a
-
-            rts
-
-
-            fin ;***
-
-
 *
 * draw/erase appl
 *
 erase_appl  ldy #oldy_int
             lda (appl),y
-            eor #$80
             sta ypos
             ldy #oldx_int
             jmp eor_appl
 
 draw_appl   ldy #y_int
             lda (appl),y
-            eor #$80
             sta ypos
             ldy #x_int
 
 eor_appl    lda (appl),y
-            eor #$80
             tax
             lda div7,x
+            clc
+            adc #grid_screen_left
             sta xpos
             ldy mod7,x
             lda applz_lo,y
