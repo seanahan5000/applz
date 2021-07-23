@@ -336,7 +336,6 @@ block_type2     = 2
 block_height    = 18
 block_gap       = 2
 
-wide_blocks = 0
 grid_screen_left = 9
 grid_screen_top = block_height + block_gap
 grid_width  = 7
@@ -392,22 +391,14 @@ draw_block  stx grid_col
             lda #$d5
             cpx #block_type2
             bne :skip2
-        do wide_blocks
-            eor #$ff
-        else
             eor #$80
-        fin
 :skip2      sta block_color
 
             ; block_x = (grid_col * 3) + grid_screen_left
 
             lda grid_col
             asl a
-        do wide_blocks
-            asl a
-        else
             adc grid_col
-        fin
             adc #grid_screen_left
             sta block_left
 
@@ -440,18 +431,10 @@ draw_block  stx grid_col
             sta (screenl),y
             iny
             eor #$7f
-        do wide_blocks
-            sta (screenl),y
-            iny
-            eor #$7f
-        fin
             and #$9f            ; clip out block gap
             sta (screenl),y
             dey
             dey
-        do wide_blocks
-            dey
-        fin
             inx
             cpx block_bot
             bne :loop3
