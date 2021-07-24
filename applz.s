@@ -5,6 +5,8 @@ ycount      = $02
 
 appl_index  = $14
 appl_count  = $15
+angle       = $16
+next_angle  = $17
 
 screenl     = $20
 screenh     = $21
@@ -58,6 +60,11 @@ fullscreen  = $C052
 primary     = $C054
 secondary   = $C055
 hires       = $C057
+pbutton0    = $C061
+;paddle0     = $C064
+;ptrigger    = $C070
+
+pread       = $FB1E
 
             org $6000
 
@@ -80,17 +87,101 @@ start
 
             jsr draw_blocks
 
-            lda #0
+            lda #$80
+            sta angle
+            sta next_angle
+
+            lda #16         ; dot count
             sta appl_count
+            lda #0
+            sta appl_index
 
-            ; create one appl
+            ; draw aiming ball
 
-            jsr init_appl
-            jsr draw_appl
+            lda #70
+            sta x_int
+            lda #0
+            sta x_frac
+            lda #185
+            sta y_int
+            lda #0
+            sta y_frac
 
-            inc appl_count
+            ldx x_int
+            lda y_int
+            jsr eor_appl
 
-            ; update applz
+angle_loop  lda next_angle
+            sta angle
+            jsr compute_deltas
+
+:loop1      inc appl_index
+            ldx appl_index
+            cpx appl_count
+            beq :skip1
+
+            ; copy dx and dy from previous dot
+
+            lda x_frac-1,x
+            sta x_frac,x
+            lda x_int-1,x
+            sta x_int,x
+
+            lda y_frac-1,x
+            sta y_frac,x
+            lda y_int-1,x
+            sta y_int,x
+
+            lda dx_frac-1,x
+            sta dx_frac,x
+            lda dx_int-1,x
+            sta dx_int,x
+
+            lda dy_frac-1,x
+            sta dy_frac,x
+            lda dy_int-1,x
+            sta dy_int,x
+
+            ; apply dx and dy multiple times
+
+            lda #8
+            sta grid_col            ;***
+:loop3      jsr update_appl
+            dec grid_col
+            bne :loop3
+
+            jsr eor_dot
+            jmp :loop1
+:skip1
+
+:loop4      bit pbutton0        ; check for paddle 0 button press
+            bmi launch_ball
+            ldx #0
+            jsr pread           ; read paddle 0 value
+            sty next_angle
+            cpy angle
+            beq :loop4
+
+            jsr erase_dots
+
+            lda #0
+            sta appl_index
+            jmp angle_loop
+
+erase_dots  lda #1
+            sta appl_index
+:loop1      jsr eor_dot
+            inc appl_index
+            lda appl_index
+            cmp appl_count
+            bne :loop1
+            rts
+
+launch_ball
+            jsr erase_dots
+
+            lda #1
+            sta appl_count
 
 update_loop
             lda #0
@@ -110,10 +201,11 @@ update_loop
             cmp oldy_int,x
             beq :skip4
 
-:skip3      jsr erase_appl  ;*** make sure position changed
+:skip3      jsr erase_appl
             jsr draw_appl
 :skip4
 
+            inc appl_index
             lda appl_index
             cmp appl_count
             bne :loop2
@@ -146,6 +238,8 @@ init_appl   ldx appl_index
             lda #0
             sta oldx_int,x
             sta oldy_int,x
+            sta oldx_frac,x
+            sta oldy_frac,x
             sta x_frac,x
             sta y_frac,x
 
@@ -185,11 +279,9 @@ update_y    lda y_frac,x
             sta y_int,x
             rts
 
-reverse_x   ; back up to old x
-            lda oldx_frac,x
+reverse_x   lda oldx_frac,x     ; back up to old x
             sta x_frac,x
-            ; negate dx
-            lda dx_frac,x
+            lda dx_frac,x       ; negate dx
             eor #$ff
             clc
             adc #1
@@ -214,9 +306,77 @@ reverse_y   lda oldy_frac,x     ; back up to old y
             sta dy_int,x
             rts
 
+;
+; entry
+;   a: angle 0 (full left) to 255 (full right)
+;
+; *** don't allow full left/right ***
+; *** check shortcut sine negating math ***
+;
+compute_deltas
+            tax
+            bpl :left
+
+:right      and #$7f
+            tax
+            eor #$7f
+            tay
+
+            lda sine_table,x
+            sta dx_frac
+            lda #0
+            sta dx_int
+
+            lda sine_table,y
+            eor #$ff
+            sta dy_frac
+            lda #$ff
+            sta dy_int
+            rts
+
+:left       eor #$7f
+            tay
+
+            lda sine_table,y
+            eor #$ff
+            sta dx_frac
+            lda #$ff
+            sta dx_int
+
+            lda sine_table,x
+            eor #$ff
+            sta dy_frac
+            lda #$ff
+            sta dy_int
+            rts
+
+;
+; 128 sine values from [0, PI / 2)
+;
+;   for (uint32_t i = 0; i < 128; ++i)
+;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+;
+sine_table  hex 000306090c0f1215
+            hex 191c1f2225282b2e
+            hex 3135383b3e414447
+            hex 4a4d505356595c5f
+            hex 6164676a6d707375
+            hex 787b7e808386888b
+            hex 8e909395989b9d9f
+            hex a2a4a7a9abaeb0b2
+            hex b5b7b9bbbdbfc1c3
+            hex c5c7c9cbcdcfd1d3
+            hex d4d6d8d9dbdddee0
+            hex e1e3e4e6e7e8eaeb
+            hex ecedeeeff1f2f3f4
+            hex f4f5f6f7f8f9f9fa
+            hex fbfbfcfcfdfdfefe
+            hex feffffffffffffff
+
 
 ; TODO: remove these
 block_defaults
+        do 0
             db 1,1,2,2,1,1,1
             db 2,2,0,2,1,2,1
             db 1,2,1,1,1,2,0
@@ -224,7 +384,15 @@ block_defaults
             db 1,2,1,2,1,1,1
             db 1,0,1,1,2,0,1
             db 1,2,1,2,1,2,2
-
+        else
+            db 1,0,2,0,0,1,0
+            db 2,0,0,0,0,2,1
+            db 0,2,1,0,0,2,0
+            db 1,0,0,0,1,0,1
+            db 1,0,1,2,0,0,0
+            db 0,0,0,0,2,0,0
+            db 0,0,0,2,1,0,0
+        fin
 ;
 ; draw all blocks in grid using block_table
 ;
@@ -316,6 +484,19 @@ draw_block  stx grid_col
             rts
 
 ;
+; eor the dot shape
+;
+eor_dot     ldy appl_index
+            ldx x_int,y
+            lda y_int,y
+            sta ypos
+            ldy mod7,x
+            lda dotz_lo,y
+            sta eor_mod+1
+            lda dotz_hi,y
+            sta eor_mod+2
+            jmp eor_shape
+;
 ; erase appl at old position using table data
 ;
 erase_appl  ldy appl_index
@@ -338,39 +519,39 @@ draw_appl   ldy appl_index
 ;   a: screen y position
 ;
 eor_appl    sta ypos
-            lda div7,x
+            ldy mod7,x
+            lda applz_lo,y
+            sta eor_mod+1
+            lda applz_hi,y
+            sta eor_mod+2
+eor_shape   lda div7,x
             clc
             adc #grid_screen_left
             sta xpos
-            ldy mod7,x
-            lda applz_lo,y
-            sta :loop2_mod+1
-            lda applz_hi,y
-            sta :loop2_mod+2
             lda #5
             sta ycount
             ldx #0
             ldy ypos
-:loop1      lda hires_table_lo,y
+eor_loop    lda hires_table_lo,y
             clc
             adc xpos
             sta screenl
             lda hires_table_hi,y
             sta screenh
             ldy #0
-:loop2_mod  lda $0000,x
+eor_mod     lda $0000,x
             beq :skip1
             eor (screenl),y
             sta (screenl),y
 :skip1      inx
             iny
             cpy #2
-            bne :loop2_mod
+            bne eor_mod
             ldy ypos
             iny
             sty ypos
             dec ycount
-            bne :loop1
+            bne eor_loop
             rts
 
 ;
@@ -471,6 +652,64 @@ appl6       db  %00000000, %00000111
             db  %01000000, %00001111
             db  %01000000, %00001111
             db  %00000000, %00000111
+
+dotz_lo     db  #<dot0
+            db  #<dot1
+            db  #<dot2
+            db  #<dot3
+            db  #<dot4
+            db  #<dot5
+            db  #<dot6
+
+dotz_hi     db  #>dot0
+            db  #>dot1
+            db  #>dot2
+            db  #>dot3
+            db  #>dot4
+            db  #>dot5
+            db  #>dot6
+
+dot0        db  %00000000, %00000000
+            db  %00001100, %00000000
+            db  %00001100, %00000000
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot1        db  %00000000, %00000000
+            db  %00011000, %00000000
+            db  %00011000, %00000000
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot2        db  %00000000, %00000000
+            db  %00110000, %00000000
+            db  %00110000, %00000000
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot3        db  %00000000, %00000000
+            db  %01100000, %00000000
+            db  %01100000, %00000000
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot4        db  %00000000, %00000000
+            db  %01000000, %00000001
+            db  %01000000, %00000001
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot5        db  %00000000, %00000000
+            db  %00000000, %00000011
+            db  %00000000, %00000011
+            db  %00000000, %00000000
+            db  %00000000, %00000000
+
+dot6        db  %00000000, %00000000
+            db  %00000000, %00000110
+            db  %00000000, %00000110
+            db  %00000000, %00000000
+            db  %00000000, %00000000
 
 div7        hex 00000000000000
             hex 01010101010101
@@ -600,26 +839,28 @@ hires_table_hi
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
 
+
+
+            do 0
 ;
-; 128 sine values from [0, PI / 2)
+; on entry:
+;   x: paddle number 0-1
 ;
-;   for (uint32_t i = 0; i < 128; ++i)
-;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+; on exit:
+;   y: paddle value 0-255
 ;
-sine_table  hex 000306090c0f1215
-            hex 191c1f2225282b2e
-            hex 3135383b3e414447
-            hex 4a4d505356595c5f
-            hex 6164676a6d707375
-            hex 787b7e808386888b
-            hex 8e909395989b9d9f
-            hex a2a4a7a9abaeb0b2
-            hex b5b7b9bbbdbfc1c3
-            hex c5c7c9cbcdcfd1d3
-            hex d4d6d8d9dbdddee0
-            hex e1e3e4e6e7e8eaeb
-            hex ecedeeeff1f2f3f4
-            hex f4f5f6f7f8f9f9fa
-            hex fbfbfcfcfdfdfefe
-            hex feffffffffffffff
+; NOTE: this is just a local copy of PREAD from ROM
+;
+read_paddle lda  ptrigger
+            ldy  #$00
+            nop
+            nop
+:loop1      lda  paddle0,x
+            bpl  :skip1
+            iny
+            bne  :loop1
+            dey
+:skip1      rts
+
+            fin
 
