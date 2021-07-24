@@ -6,7 +6,6 @@ ycount      = $02
 appl_index  = $14
 appl_count  = $15
 angle       = $16
-next_angle  = $17
 
 screenl     = $20
 screenh     = $21
@@ -61,15 +60,13 @@ primary     = $C054
 secondary   = $C055
 hires       = $C057
 pbutton0    = $C061
-;paddle0     = $C064
-;ptrigger    = $C070
 
-pread       = $FB1E
+PREAD       = $FB1E
 
             org $6000
 
 start
-            ; clear and display screen
+            ; clear and show screen
 
             jsr clear1
             sta primary
@@ -89,7 +86,6 @@ start
 
             lda #$80
             sta angle
-            sta next_angle
 
             lda #16         ; dot count
             sta appl_count
@@ -111,14 +107,29 @@ start
             lda y_int
             jsr eor_appl
 
-angle_loop  lda next_angle
-            sta angle
-            jsr compute_deltas
+angle_loop  jsr compute_deltas
+            jsr draw_dots
 
-:loop1      inc appl_index
-            ldx appl_index
-            cpx appl_count
-            beq :skip1
+:loop1      bit pbutton0        ; check for paddle 0 button press
+            bmi launch_ball
+            ldx #0
+            jsr PREAD           ; read paddle 0 value
+            cpy #2              ; clamp value to [2,253]
+            bcs :skip1
+            ldy #2
+:skip1      cpy #253
+            bcc :skip2
+            ldy #253
+:skip2      cpy angle
+            beq :loop1          ; loop until something changes
+            sty angle
+
+            jsr erase_dots
+            jmp angle_loop
+
+
+draw_dots   ldx #1
+:loop1      stx appl_index
 
             ; copy dx and dy from previous dot
 
@@ -146,27 +157,18 @@ angle_loop  lda next_angle
 
             lda #8
             sta grid_col            ;***
-:loop3      jsr update_appl
+:loop2      jsr update_appl
             dec grid_col
-            bne :loop3
+            bne :loop2
 
             jsr eor_dot
-            jmp :loop1
-:skip1
 
-:loop4      bit pbutton0        ; check for paddle 0 button press
-            bmi launch_ball
-            ldx #0
-            jsr pread           ; read paddle 0 value
-            sty next_angle
-            cpy angle
-            beq :loop4
+            ldx appl_index
+            inx
+            cpx appl_count
+            bne :loop1
+            rts
 
-            jsr erase_dots
-
-            lda #0
-            sta appl_index
-            jmp angle_loop
 
 erase_dots  lda #1
             sta appl_index
@@ -177,8 +179,7 @@ erase_dots  lda #1
             bne :loop1
             rts
 
-launch_ball
-            jsr erase_dots
+launch_ball jsr erase_dots
 
             lda #1
             sta appl_count
@@ -204,46 +205,12 @@ update_loop
 :skip3      jsr erase_appl
             jsr draw_appl
 :skip4
-
             inc appl_index
             lda appl_index
             cmp appl_count
             bne :loop2
 
             jmp update_loop
-
-;
-; choose initial position/movement for appl
-;
-init_appl   ldx appl_index
-
-            lda #70
-            sta x_int,x
-
-            lda #180
-            sta y_int,x
-
-            lda #0
-            sta dx_int,x
-
-            lda #128
-            sta dx_frac,x
-
-            lda #0
-            sta dy_int,x
-
-            lda #20
-            sta dy_frac,x
-
-            lda #0
-            sta oldx_int,x
-            sta oldy_int,x
-            sta oldx_frac,x
-            sta oldy_frac,x
-            sta x_frac,x
-            sta y_frac,x
-
-            rts
 
 ;
 ; update single appl position
@@ -310,8 +277,7 @@ reverse_y   lda oldy_frac,x     ; back up to old y
 ; entry
 ;   a: angle 0 (full left) to 255 (full right)
 ;
-; *** don't allow full left/right ***
-; *** check shortcut sine negating math ***
+; NOTE: shortcut (ones-complement) negation being used
 ;
 compute_deltas
             tax
@@ -496,6 +462,7 @@ eor_dot     ldy appl_index
             lda dotz_hi,y
             sta eor_mod+2
             jmp eor_shape
+
 ;
 ; erase appl at old position using table data
 ;
@@ -669,6 +636,7 @@ dotz_hi     db  #>dot0
             db  #>dot5
             db  #>dot6
 
+; TODO cut these down in height
 dot0        db  %00000000, %00000000
             db  %00001100, %00000000
             db  %00001100, %00000000
@@ -838,29 +806,4 @@ hires_table_hi
             hex 22262a2e32363a3e
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
-
-
-
-            do 0
-;
-; on entry:
-;   x: paddle number 0-1
-;
-; on exit:
-;   y: paddle value 0-255
-;
-; NOTE: this is just a local copy of PREAD from ROM
-;
-read_paddle lda  ptrigger
-            ldy  #$00
-            nop
-            nop
-:loop1      lda  paddle0,x
-            bpl  :skip1
-            iny
-            bne  :loop1
-            dey
-:skip1      rts
-
-            fin
 
