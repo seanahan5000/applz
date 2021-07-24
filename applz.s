@@ -1,56 +1,63 @@
 
-            dummy 0
+xpos        = $00
+ypos        = $01
+ycount      = $02
+
+appl_index  = $14
+appl_count  = $15
+
+screenl     = $20
+screenh     = $21
 
 ;*** ENABLED/VISIBLE? ***
-x_frac      db  0
-oldx_frac   db  0
-dx_frac     db  0
+x_frac      = $1000
+x_int       = $1100
+oldx_frac   = $1200
+oldx_int    = $1300
+dx_frac     = $1400
+dx_int      = $1500
+y_frac      = $1600
+y_int       = $1700
+oldy_frac   = $1800
+oldy_int    = $1900
+dy_frac     = $1a00
+dy_int      = $1b00
 
-x_int       db  0
-oldx_int    db  0
-dx_int      db  0
+block_table = $0800
 
-y_frac      db  0
-oldy_frac   db  0
-dy_frac     db  0
+block_type1  = 1
+block_type2  = 2
+block_height = 18
+block_gap    = 2
 
-y_int       db  0
-oldy_int    db  0
-dy_int      db  0
+grid_screen_left = 9
+grid_screen_top = block_height + block_gap
+grid_width  = 7
+grid_height = 7
+grid_size   = grid_width * grid_height
 
-entry_size
-            dend
+grid_col    = $30
+grid_row    = $31
+block_index = $32
+block_type  = $33
+block_color = $34
+block_top   = $35
+block_left  = $36
+block_bot   = $37
 
-xpos        =   $00
-ypos        =   $01
-ycount      =   $02
-
-appl        =   $10
-applh       =   $11
-appl_end    =   $12
-applh_end   =   $13
-appl_index  =   $14
-appl_count  =   $15
-
-screenl     =   $20
-screenh     =   $21
-
-applz_base  =   $1000
-block_table =   $0800
-
-blocks_wide =   7
-blocks_high =   7
+ball_width  = 5
+ball_height = 5
 
 ; TODO: use correct abbreviations
-keyboard    =   $C000
-unstrobe    =   $C010
-click       =   $C030
-graphics    =   $C050
-text        =   $C051
-fullscreen  =   $C052
-primary     =   $C054
-secondary   =   $C055
-hires       =   $C057
+keyboard    = $C000
+unstrobe    = $C010
+click       = $C030
+graphics    = $C050
+text        = $C051
+fullscreen  = $C052
+primary     = $C054
+secondary   = $C055
+hires       = $C057
 
             org $6000
 
@@ -65,7 +72,7 @@ start
 
             ; copy default table
 
-            ldx #blocks_high*blocks_wide-1
+            ldx #grid_size-1
 :loop0      lda block_defaults,x
             sta block_table,x
             dex
@@ -75,213 +82,136 @@ start
 
             lda #0
             sta appl_count
-            lda #<applz_base
-            sta appl
-            sta appl_end
-            lda #>applz_base
-            sta applh
-            sta applh_end
 
             ; create one appl
 
-            lda appl_end
-            sta appl
-            lda applh_end
-            sta applh
             jsr init_appl
             jsr draw_appl
 
             inc appl_count
-            lda appl_end
-            clc
-            adc #entry_size
-            sta appl_end
-            bcc :skip1
-            inc applh_end
-:skip1
 
             ; update applz
 
-update_loop lda #<applz_base
-            sta appl
-            lda #>applz_base
-            sta applh
-
-            lda appl_count
+update_loop
+            lda #0
             sta appl_index
 
 :loop2      jsr update_appl
 
             ; TODO: checking for movement probably not needed in real game
 
-            ldy #x_int
-            lda (appl),y
-            ldy #oldx_int
-            cmp (appl),y
+            ldx appl_index
+
+            lda x_int,x
+            cmp oldx_int,x
             bne :skip3
 
-            ldy #y_int
-            lda (appl),y
-            ldy #oldy_int
-            cmp (appl),y
-            beq :skip3
+            lda y_int,x
+            cmp oldy_int,x
+            beq :skip4
 
 :skip3      jsr erase_appl  ;*** make sure position changed
             jsr draw_appl
 :skip4
 
-            lda appl
-            clc
-            adc #entry_size
-            sta appl
-            bcc :skip2
-            inc applh
-:skip2      dec appl_index
+            lda appl_index
+            cmp appl_count
             bne :loop2
 
             jmp update_loop
 
-*
-* choose initial position/movement for appl
-*
-init_appl   ldy #x_int
+;
+; choose initial position/movement for appl
+;
+init_appl   ldx appl_index
+
             lda #70
-            sta (appl),y
+            sta x_int,x
 
-            ldy #x_frac
-            lda #0
-            sta (appl),y
-
-            ldy #y_int
             lda #180
-            sta (appl),y
+            sta y_int,x
 
-            ldy #y_frac
             lda #0
-            sta (appl),y
+            sta dx_int,x
 
-            ldy #dx_int
-            lda #0
-            sta (appl),y
-
-            ldy #dx_frac
             lda #128
-            sta (appl),y
+            sta dx_frac,x
 
-            ldy #dy_int
             lda #0
-            sta (appl),y
+            sta dy_int,x
 
-            ldy #dy_frac
             lda #20
-            sta (appl),y
+            sta dy_frac,x
 
-            ldy #oldx_int
             lda #0
-            sta (appl),y
-
-            ldy #oldy_int
-            lda #0
-            sta (appl),y
+            sta oldx_int,x
+            sta oldy_int,x
+            sta x_frac,x
+            sta y_frac,x
 
             rts
 
 ;
 ; update single appl position
 ;
-update_appl ldy #x_frac
-            lda (appl),y
-            iny                 ; oldx_frac
-            sta (appl),y
+update_appl ldx appl_index
+
+            lda x_frac,x
+            sta oldx_frac,x
             clc
-            iny                 ; dx_frac
-            adc (appl),y
-            ldy #x_frac
-            sta (appl),y
-            ldy #x_int
-            lda (appl),y
-            iny                 ; oldx_int
-            sta (appl),y
-            iny                 ; dx_int
-            adc (appl),y
-            ldy #x_int
-            sta (appl),y
+            adc dx_frac,x
+            sta x_frac,x
+            lda x_int,x
+            sta oldx_int,x
+            adc dx_int,x
 
-            cmp #145-5     ;*** ball width
-            bcc :skip1          ;*** reverse context
+            cmp #145-ball_width
+            bcs reverse_x
 
-:reverse_x
-            ; back up to old x
+            sta x_int,x
 
-            ldy #oldx_frac
-            lda (appl),y
-            dey                 ; x_frac
-            sta (appl),y
-            ldy #oldx_int
-            lda (appl),y
-            dey                 ; x_int
-            sta (appl),y
-
-            ; negate dx
-
-            ldy #dx_frac
-            lda (appl),y
-            eor #$ff
+update_y    lda y_frac,x
+            sta oldy_frac,x
             clc
-            adc #1
-            sta (appl),y
-            ldy #dx_int
-            lda (appl),y
-            eor #$ff
-            adc #0
-            sta (appl),y
-:skip1
+            adc dy_frac,x
+            sta y_frac,x
+            lda y_int,x
+            sta oldy_int,x
+            adc dy_int,x
 
-            ldy #y_frac
-            lda (appl),y
-            ldy #oldy_frac
-            sta (appl),y
-            clc
-            ldy #dy_frac
-            adc (appl),y
-            ldy #y_frac
-            sta (appl),y
-            ldy #y_int
-            lda (appl),y
-            ldy #oldy_int
-            sta (appl),y
-            ldy #dy_int
-            adc (appl),y
+            cmp #192-ball_height
+            bcs reverse_y
 
-            cmp #192-5      ;*** ball height
-            bcs reverse_y   ;*** also checks against 0
-
-            ldy #y_int
-            sta (appl),y
-            ;*** reflection on top, kill on bottom ***
+            sta y_int,x
             rts
 
-reverse_y
-            ; back up to old y
-
-            ldy #oldy_frac
-            lda (appl),y
-            ldy #y_frac
-            sta (appl),y
-
-            ; negate dy
-
-            ldy #dy_frac
-            lda (appl),y
+reverse_x   ; back up to old x
+            lda oldx_frac,x
+            sta x_frac,x
+            ; negate dx
+            lda dx_frac,x
             eor #$ff
             clc
             adc #1
-            sta (appl),y
-            ldy #dy_int
-            lda (appl),y
+            sta dx_frac,x
+            lda dx_int,x
             eor #$ff
             adc #0
-            sta (appl),y
+            sta dx_int,x
+            jmp update_y
+
+            ;*** reflection on top, kill on bottom ***
+reverse_y   lda oldy_frac,x     ; back up to old y
+            sta y_frac,x
+            lda dy_frac,x       ; negate dy
+            eor #$ff
+            clc
+            adc #1
+            sta dy_frac,x
+            lda dy_int,x
+            eor #$ff
+            adc #0
+            sta dy_int,x
             rts
 
 
@@ -294,61 +224,6 @@ block_defaults
             db 1,2,1,2,1,1,1
             db 1,0,1,1,2,0,1
             db 1,2,1,2,1,2,2
-
-;
-; on entry:
-;   x: block x
-;   y: block y
-;
-; on exit
-;   a: block value
-;
-get_block   txa
-:loop1      dey
-            bmi :skip1
-            clc
-            adc #blocks_wide
-            bne :loop1          ; always
-:skip1      tax
-            lda block_table,x
-            rts
-
-;
-; on entry:
-;   x: block x
-;   y: block y
-;   a: value
-;
-set_block   pha
-            txa
-:loop1      dey
-            bmi :skip1
-            clc
-            adc #blocks_wide
-            bne :loop1          ; always
-:skip1      tax
-            pla
-            sta block_table,x
-            rts
-
-block_type1     = 1
-block_type2     = 2
-block_height    = 18
-block_gap       = 2
-
-grid_screen_left = 9
-grid_screen_top = block_height + block_gap
-grid_width  = 7
-grid_height = 7
-
-grid_col    = $30
-grid_row    = $31
-block_index = $32
-block_type  = $33
-block_color = $34
-block_top   = $35
-block_left  = $36
-block_bot   = $37
 
 ;
 ; draw all blocks in grid using block_table
@@ -440,55 +315,103 @@ draw_block  stx grid_col
             bne :loop3
             rts
 
-*
-* draw/erase appl
-*
-erase_appl  ldy #oldy_int
-            lda (appl),y
-            sta ypos
-            ldy #oldx_int
+;
+; erase appl at old position using table data
+;
+erase_appl  ldy appl_index
+            ldx oldx_int,y
+            lda oldy_int,y
             jmp eor_appl
 
-draw_appl   ldy #y_int
-            lda (appl),y
-            sta ypos
-            ldy #x_int
-
-eor_appl    lda (appl),y
-            tax
+;
+; draw appl at new position using table data
+;
+draw_appl   ldy appl_index
+            ldx x_int,y
+            lda y_int,y    ; fall through
+;
+; eor appl to specific screen coordinates
+;   relative to grid edge
+;
+; on entry
+;   x: screen x position
+;   a: screen y position
+;
+eor_appl    sta ypos
             lda div7,x
             clc
             adc #grid_screen_left
             sta xpos
             ldy mod7,x
             lda applz_lo,y
-            sta xloop_mod+1
+            sta :loop2_mod+1
             lda applz_hi,y
-            sta xloop_mod+2
+            sta :loop2_mod+2
             lda #5
             sta ycount
             ldx #0
             ldy ypos
-eor_loop    lda hires_table_lo,y
+:loop1      lda hires_table_lo,y
             clc
             adc xpos
             sta screenl
             lda hires_table_hi,y
             sta screenh
             ldy #0
-xloop_mod   lda $0000,x
+:loop2_mod  lda $0000,x
             beq :skip1
             eor (screenl),y
             sta (screenl),y
 :skip1      inx
             iny
             cpy #2
-            bne xloop_mod
+            bne :loop2_mod
             ldy ypos
             iny
             sty ypos
             dec ycount
-            bne eor_loop
+            bne :loop1
+            rts
+
+;
+; clear primary screen to black
+;
+clear1      ldx #0
+            txa
+:loop       sta $2000,x
+            sta $2100,x
+            sta $2200,x
+            sta $2300,x
+            sta $2400,x
+            sta $2500,x
+            sta $2600,x
+            sta $2700,x
+            sta $2800,x
+            sta $2900,x
+            sta $2a00,x
+            sta $2b00,x
+            sta $2c00,x
+            sta $2d00,x
+            sta $2e00,x
+            sta $2f00,x
+            sta $3000,x
+            sta $3100,x
+            sta $3200,x
+            sta $3300,x
+            sta $3400,x
+            sta $3500,x
+            sta $3600,x
+            sta $3700,x
+            sta $3800,x
+            sta $3900,x
+            sta $3a00,x
+            sta $3b00,x
+            sta $3c00,x
+            sta $3d00,x
+            sta $3e00,x
+            sta $3f00,x
+            inx
+            bne :loop
             rts
 
 applz_lo    db  #<appl0
@@ -677,41 +600,26 @@ hires_table_hi
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
 
-clear1      ldx #0
-            txa
-:loop       sta $2000,x
-            sta $2100,x
-            sta $2200,x
-            sta $2300,x
-            sta $2400,x
-            sta $2500,x
-            sta $2600,x
-            sta $2700,x
-            sta $2800,x
-            sta $2900,x
-            sta $2a00,x
-            sta $2b00,x
-            sta $2c00,x
-            sta $2d00,x
-            sta $2e00,x
-            sta $2f00,x
-            sta $3000,x
-            sta $3100,x
-            sta $3200,x
-            sta $3300,x
-            sta $3400,x
-            sta $3500,x
-            sta $3600,x
-            sta $3700,x
-            sta $3800,x
-            sta $3900,x
-            sta $3a00,x
-            sta $3b00,x
-            sta $3c00,x
-            sta $3d00,x
-            sta $3e00,x
-            sta $3f00,x
-            inx
-            bne :loop
-            rts
+;
+; 128 sine values from [0, PI / 2)
+;
+;   for (uint32_t i = 0; i < 128; ++i)
+;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+;
+sine_table  hex 000306090c0f1215
+            hex 191c1f2225282b2e
+            hex 3135383b3e414447
+            hex 4a4d505356595c5f
+            hex 6164676a6d707375
+            hex 787b7e808386888b
+            hex 8e909395989b9d9f
+            hex a2a4a7a9abaeb0b2
+            hex b5b7b9bbbdbfc1c3
+            hex c5c7c9cbcdcfd1d3
+            hex d4d6d8d9dbdddee0
+            hex e1e3e4e6e7e8eaeb
+            hex ecedeeeff1f2f3f4
+            hex f4f5f6f7f8f9f9fa
+            hex fbfbfcfcfdfdfefe
+            hex feffffffffffffff
 
