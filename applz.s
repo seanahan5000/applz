@@ -1,41 +1,42 @@
 
-xpos        = $00
-ypos        = $01
-ycount      = $02
-
-appl_index  = $14
-appl_count  = $15
-angle       = $16
-
-screenl     = $20
-screenh     = $21
-
-;*** ENABLED/VISIBLE? ***
-x_frac      = $1000
-x_int       = $1100
-oldx_frac   = $1200
-oldx_int    = $1300
-dx_frac     = $1400
-dx_int      = $1500
-y_frac      = $1600
-y_int       = $1700
-oldy_frac   = $1800
-oldy_int    = $1900
-dy_frac     = $1a00
-dy_int      = $1b00
-
-block_table = $0800
-
 block_type1  = 1
 block_type2  = 2
-block_height = 18
+block_height = 18   ; excluding gap
 block_gap    = 2
+
+ball_width  = 5
+ball_height = 5
+dot_height  = 3
 
 grid_screen_left = 9
 grid_screen_top = block_height + block_gap
 grid_width  = 7
 grid_height = 7
+grid_screen_width = grid_width * 3 * 7
 grid_size   = grid_width * grid_height
+
+send_delay  = 16
+
+start_y     = 192 - ball_height
+
+xpos        = $00
+ypos        = $01
+ycount      = $02
+
+applz_ready   = $10     ; applz ready but not yet launched
+applz_visible = $11     ; applz visible on screen (<= appl_slots)
+appl_slots    = $12     ; slots used in tables, both visible and complete
+appl_index  = $13
+dot_count   = $14
+
+angle         = $16
+angle_dx_frac = $17
+angle_dx_int  = $18
+angle_dy_frac = $19
+angle_dy_int  = $1a
+
+start_x     = $1b   ; variable position relative to grid edge
+send_countdown = $1c
 
 grid_col    = $30
 grid_row    = $31
@@ -46,8 +47,24 @@ block_top   = $35
 block_left  = $36
 block_bot   = $37
 
-ball_width  = 5
-ball_height = 5
+screenl     = $20
+screenh     = $21
+
+state       = $1000 ; high bit set when visible/active
+x_frac      = $1100
+x_int       = $1200
+oldx_frac   = $1300
+oldx_int    = $1400
+dx_frac     = $1500
+dx_int      = $1600
+y_frac      = $1700
+y_int       = $1800
+oldy_frac   = $1900
+oldy_int    = $1a00
+dy_frac     = $1b00
+dy_int      = $1c00
+
+block_table = $0800
 
 ; TODO: use correct abbreviations
 keyboard    = $C000
@@ -63,12 +80,12 @@ pbutton0    = $C061
 
 PREAD       = $FB1E
 
+; TODO:
+;   - keyboard aiming support?
+
             org $6000
 
-start
-            ; clear and show screen
-
-            jsr clear1
+start       jsr clear1
             sta primary
             sta fullscreen
             sta hires
@@ -77,59 +94,170 @@ start
             ; copy default table
 
             ldx #grid_size-1
-:loop0      lda block_defaults,x
+:1          lda block_defaults,x
             sta block_table,x
             dex
-            bpl :loop0
+            bpl :1
 
             jsr draw_blocks
+
+            lda #72
+            sta start_x
+
+;=======================================
+; Aiming mode
+;=======================================
+
+aiming_mode lda #16         ;*** dot count
+            sta dot_count
+            lda #0
+            sta appl_index
+
+            lda #0
+            sta x_frac
+            sta y_frac
+            ldx start_x
+            stx x_int
+            lda #start_y
+            sta y_int
+            jsr eor_appl        ; draw aiming ball
 
             lda #$80
             sta angle
 
-            lda #16         ; dot count
-            sta appl_count
-            lda #0
-            sta appl_index
+:1          jsr update_angle
+            lda angle_dx_frac
+            sta dx_frac
+            lda angle_dx_int
+            sta dx_int
+            lda angle_dy_frac
+            sta dy_frac
+            lda angle_dy_int
+            sta dy_int
 
-            ; draw aiming ball
-
-            lda #70
-            sta x_int
-            lda #0
-            sta x_frac
-            lda #185
-            sta y_int
-            lda #0
-            sta y_frac
-
-            ldx x_int
-            lda y_int
-            jsr eor_appl
-
-angle_loop  jsr compute_deltas
             jsr draw_dots
 
-:loop1      bit pbutton0        ; check for paddle 0 button press
+:2          bit pbutton0        ; check for paddle 0 button press
             bmi launch_ball
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
-            bcs :skip1
+            bcs :3
             ldy #2
-:skip1      cpy #253
-            bcc :skip2
+:3          cpy #253
+            bcc :4
             ldy #253
-:skip2      cpy angle
-            beq :loop1          ; loop until something changes
+:4          cpy angle
+            beq :2              ; loop until something changes
             sty angle
 
             jsr erase_dots
-            jmp angle_loop
+            jmp :1
 
+;=======================================
+; Running mode
+;=======================================
+
+launch_ball jsr erase_dots
+
+            ldx x_int
+            lda y_int
+            jsr eor_appl        ; erase aiming ball
+
+            lda #12             ;***
+            sta applz_ready
+            lda #1
+            sta send_countdown
+            lda #0
+            sta applz_visible
+            sta appl_slots
+            beq :first          ; always
+
+:loop1      ldx #0
+:loop2      stx appl_index
+
+            lda state,x
+            bpl :skip4
+
+            jsr update_appl
+
+            lda x_int,x         ; check for change in x position
+            cmp oldx_int,x
+            bne :skip3
+
+            lda y_int,x         ; check for change in y position
+            cmp oldy_int,x
+            beq :skip4
+
+:skip3      jsr erase_appl
+            jsr draw_appl
+:skip4
+            ldx appl_index
+            inx
+            cpx appl_slots
+            bne :loop2
+
+
+            lda applz_ready     ; check for applz left to send
+            beq :11
+
+            dec send_countdown  ; check if it has been long enough to send
+            bne :11
+
+            lda applz_visible   ; no more than 255 applz simultaneously
+            cmp #255
+            beq :11
+
+:first      ldx appl_slots      ; get slot for new appl
+            cpx #255
+            beq :8
+            inc appl_slots      ; consume next empty slot
+            bne :9              ; always
+            ;*** compress lists?
+:8          lda state-1,x       ; search for open existing slot
+            bpl :9
+            dex
+            bne :8
+            ;*** should have found a slot ***
+
+:9          lda #$80            ; mark as active
+            sta state,x
+
+            lda start_x         ; set start position
+            sta x_int,x
+            sta oldx_int,x
+            lda #start_y
+            sta y_int,x
+            sta oldy_int,x
+            lda #0
+            sta x_frac,x
+            sta y_frac,x
+            sta oldx_frac,x
+            sta oldy_frac,x
+
+            lda angle_dx_frac   ; set deltas based on angle
+            sta dx_frac,x
+            lda angle_dx_int
+            sta dx_int,x
+            lda angle_dy_frac
+            sta dy_frac,x
+            lda angle_dy_int
+            sta dy_int,x
+
+            dec applz_ready
+            inc applz_visible
+
+            stx appl_index
+            jsr draw_appl       ;*** not needed on first pass ***
+
+            lda #send_delay     ; reset send delay countdown
+            sta send_countdown
+:11         jmp :loop1
+
+;---------------------------------------
 
 draw_dots   ldx #1
-:loop1      stx appl_index
+:1          stx appl_index
 
             ; copy dx and dy from previous dot
 
@@ -157,67 +285,40 @@ draw_dots   ldx #1
 
             lda #8
             sta grid_col            ;***
-:loop2      jsr update_appl
+            ldx appl_index
+:2          jsr update_appl
             dec grid_col
-            bne :loop2
+            bne :2
 
             jsr eor_dot
 
             ldx appl_index
             inx
-            cpx appl_count
-            bne :loop1
+            cpx dot_count
+            bne :1
             rts
 
 
 erase_dots  lda #1
             sta appl_index
-:loop1      jsr eor_dot
+:1          jsr eor_dot
             inc appl_index
             lda appl_index
-            cmp appl_count
-            bne :loop1
+            cmp dot_count
+            bne :1
             rts
 
-launch_ball jsr erase_dots
-
-            lda #1
-            sta appl_count
-
-update_loop
-            lda #0
-            sta appl_index
-
-:loop2      jsr update_appl
-
-            ; TODO: checking for movement probably not needed in real game
-
-            ldx appl_index
-
-            lda x_int,x
-            cmp oldx_int,x
-            bne :skip3
-
-            lda y_int,x
-            cmp oldy_int,x
-            beq :skip4
-
-:skip3      jsr erase_appl
-            jsr draw_appl
-:skip4
-            inc appl_index
-            lda appl_index
-            cmp appl_count
-            bne :loop2
-
-            jmp update_loop
-
+;---------------------------------------
 ;
 ; update single appl position
 ;
-update_appl ldx appl_index
-
-            lda x_frac,x
+; on entry:
+;   x: appl_index
+;
+; on exit:
+;   x: appl_index
+;
+update_appl lda x_frac,x
             sta oldx_frac,x
             clc
             adc dx_frac,x
@@ -226,7 +327,7 @@ update_appl ldx appl_index
             sta oldx_int,x
             adc dx_int,x
 
-            cmp #145-ball_width
+            cmp #grid_screen_width - ball_width
             bcs reverse_x
 
             sta x_int,x
@@ -273,13 +374,15 @@ reverse_y   lda oldy_frac,x     ; back up to old y
             sta dy_int,x
             rts
 
+;---------------------------------------
 ;
 ; entry
 ;   a: angle 0 (full left) to 255 (full right)
 ;
 ; NOTE: shortcut (ones-complement) negation being used
 ;
-compute_deltas
+update_angle
+            lda angle
             tax
             bpl :left
 
@@ -289,15 +392,15 @@ compute_deltas
             tay
 
             lda sine_table,x
-            sta dx_frac
+            sta angle_dx_frac
             lda #0
-            sta dx_int
+            sta angle_dx_int
 
             lda sine_table,y
             eor #$ff
-            sta dy_frac
+            sta angle_dy_frac
             lda #$ff
-            sta dy_int
+            sta angle_dy_int
             rts
 
 :left       eor #$7f
@@ -305,15 +408,15 @@ compute_deltas
 
             lda sine_table,y
             eor #$ff
-            sta dx_frac
+            sta angle_dx_frac
             lda #$ff
-            sta dx_int
+            sta angle_dx_int
 
             lda sine_table,x
             eor #$ff
-            sta dy_frac
+            sta angle_dy_frac
             lda #$ff
-            sta dy_int
+            sta angle_dy_int
             rts
 
 ;
@@ -339,6 +442,7 @@ sine_table  hex 000306090c0f1215
             hex fbfbfcfcfdfdfefe
             hex feffffffffffffff
 
+;---------------------------------------
 
 ; TODO: remove these
 block_defaults
@@ -365,23 +469,23 @@ block_defaults
 draw_blocks ldx #0
             stx grid_col
             stx grid_row
-:loop1      stx block_index
+:1          stx block_index
             lda block_table,x
-            beq :skip1
+            beq :2              ; skip empty blocks
             ldx grid_col
             ldy grid_row
             jsr draw_block
-:skip1      ldx grid_col
+:2          ldx grid_col
             inx
             cpx #grid_width
-            bne :skip2
+            bne :3
             inc grid_row
             ldx #0
-:skip2      stx grid_col
+:3          stx grid_col
             ldx block_index
             inx
-            cpx #grid_width*grid_height
-            bne :loop1
+            cpx #grid_size
+            bne :1
             rts
 
 ;
@@ -399,9 +503,9 @@ draw_block  stx grid_col
 
             lda #$d5
             cpx #block_type2
-            bne :skip2
+            bne :1
             eor #$80
-:skip2      sta block_color
+:1          sta block_color
 
             ; block_x = (grid_col * 3) + grid_screen_left
 
@@ -417,11 +521,11 @@ draw_block  stx grid_col
             lda #grid_screen_top
             clc
             ldy grid_row
-            beq :skip1
-:loop1      adc #block_height+block_gap
+            beq :3
+:2          adc #block_height+block_gap
             dey
-            bne :loop1
-:skip1      sta block_top
+            bne :2
+:3          sta block_top
             adc #block_height
             sta block_bot
 
@@ -429,7 +533,7 @@ draw_block  stx grid_col
 
             ldx block_top
             ldy block_left
-:loop3      lda hires_table_lo,x
+:4          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -446,7 +550,7 @@ draw_block  stx grid_col
             dey
             inx
             cpx block_bot
-            bne :loop3
+            bne :4
             rts
 
 ;
@@ -456,12 +560,15 @@ eor_dot     ldy appl_index
             ldx x_int,y
             lda y_int,y
             sta ypos
+            lda div7,x
+            clc
+            adc #grid_screen_left
+            sta xpos
+            lda #dot_height
+            sta ycount
             ldy mod7,x
-            lda dotz_lo,y
-            sta eor_mod+1
-            lda dotz_hi,y
-            sta eor_mod+2
-            jmp eor_shape
+            ldx dotz_lo,y
+            jmp eor_loop
 
 ;
 ; erase appl at old position using table data
@@ -486,37 +593,31 @@ draw_appl   ldy appl_index
 ;   a: screen y position
 ;
 eor_appl    sta ypos
-            ldy mod7,x
-            lda applz_lo,y
-            sta eor_mod+1
-            lda applz_hi,y
-            sta eor_mod+2
-eor_shape   lda div7,x
+            lda div7,x
             clc
             adc #grid_screen_left
             sta xpos
-            lda #5
+            lda #ball_height
             sta ycount
-            ldx #0
-            ldy ypos
-eor_loop    lda hires_table_lo,y
-            clc
-            adc xpos
+            ldy mod7,x
+            ldx applz_lo,y
+eor_loop    ldy ypos
+            lda hires_table_lo,y
             sta screenl
             lda hires_table_hi,y
             sta screenh
-            ldy #0
-eor_mod     lda $0000,x
-            beq :skip1
+            ldy xpos
+            lda appl0,x
             eor (screenl),y
             sta (screenl),y
-:skip1      inx
+            inx
             iny
-            cpy #2
-            bne eor_mod
-            ldy ypos
-            iny
-            sty ypos
+            lda appl0,x
+            beq :1
+            eor (screenl),y
+            sta (screenl),y
+:1          inx
+            inc ypos
             dec ycount
             bne eor_loop
             rts
@@ -526,7 +627,7 @@ eor_mod     lda $0000,x
 ;
 clear1      ldx #0
             txa
-:loop       sta $2000,x
+:1          sta $2000,x
             sta $2100,x
             sta $2200,x
             sta $2300,x
@@ -559,7 +660,7 @@ clear1      ldx #0
             sta $3e00,x
             sta $3f00,x
             inx
-            bne :loop
+            bne :1
             rts
 
 applz_lo    db  #<appl0
@@ -570,13 +671,15 @@ applz_lo    db  #<appl0
             db  #<appl5
             db  #<appl6
 
-applz_hi    db  #>appl0
-            db  #>appl1
-            db  #>appl2
-            db  #>appl3
-            db  #>appl4
-            db  #>appl5
-            db  #>appl6
+dotz_lo     db  #<dot0
+            db  #<dot1
+            db  #<dot2
+            db  #<dot3
+            db  #<dot4
+            db  #<dot5
+            db  #<dot6
+
+            ds  \,$ee
 
 appl0       db  %00001110, %00000000
             db  %00011111, %00000000
@@ -619,22 +722,6 @@ appl6       db  %00000000, %00000111
             db  %01000000, %00001111
             db  %01000000, %00001111
             db  %00000000, %00000111
-
-dotz_lo     db  #<dot0
-            db  #<dot1
-            db  #<dot2
-            db  #<dot3
-            db  #<dot4
-            db  #<dot5
-            db  #<dot6
-
-dotz_hi     db  #>dot0
-            db  #>dot1
-            db  #>dot2
-            db  #>dot3
-            db  #>dot4
-            db  #>dot5
-            db  #>dot6
 
 ; TODO cut these down in height
 dot0        db  %00000000, %00000000
