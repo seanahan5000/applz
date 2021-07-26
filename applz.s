@@ -138,7 +138,7 @@ aiming_mode lda #16         ;*** dot count
             jsr draw_dots
 
 :2          bit pbutton0        ; check for paddle 0 button press
-            bmi launch_ball
+            bmi running_mode
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
@@ -158,11 +158,11 @@ aiming_mode lda #16         ;*** dot count
 ; Running mode
 ;=======================================
 
-launch_ball jsr erase_dots
-
+running_mode
             ldx x_int
             lda y_int
             jsr eor_appl        ; erase aiming ball
+            jsr erase_dots
 
             lda #12             ;***
             sta applz_ready
@@ -176,10 +176,13 @@ launch_ball jsr erase_dots
 :loop1      ldx #0
 :loop2      stx appl_index
 
-            lda state,x
+            lda state,x         ; already complete?
             bpl :skip4
 
             jsr update_appl
+
+            lda state,x         ; newly complete?
+            bpl :skip4
 
             lda x_int,x         ; check for change in x position
             cmp oldx_int,x
@@ -197,16 +200,18 @@ launch_ball jsr erase_dots
             cpx appl_slots
             bne :loop2
 
-
             lda applz_ready     ; check for applz left to send
-            beq :11
+            bne :5
+            lda applz_visible
+            bne :loop1
+            beq level_mode      ; always
 
-            dec send_countdown  ; check if it has been long enough to send
-            bne :11
+:5          dec send_countdown  ; check if it has been long enough to send
+            bne :loop1
 
             lda applz_visible   ; no more than 255 applz simultaneously
             cmp #255
-            beq :11
+            beq :loop1
 
 :first      ldx appl_slots      ; get slot for new appl
             cpx #255
@@ -252,7 +257,12 @@ launch_ball jsr erase_dots
 
             lda #send_delay     ; reset send delay countdown
             sta send_countdown
-:11         jmp :loop1
+            jmp :loop1
+
+;---------------------------------------
+
+level_mode
+            jmp aiming_mode
 
 ;---------------------------------------
 
@@ -360,8 +370,10 @@ reverse_x   lda oldx_frac,x     ; back up to old x
             sta dx_int,x
             jmp update_y
 
-            ;*** reflection on top, kill on bottom ***
-reverse_y   lda oldy_frac,x     ; back up to old y
+reverse_y   cmp #192+ball_height+1
+            bcc :ball_done
+
+            lda oldy_frac,x     ; back up to old y
             sta y_frac,x
             lda dy_frac,x       ; negate dy
             eor #$ff
@@ -372,6 +384,13 @@ reverse_y   lda oldy_frac,x     ; back up to old y
             eor #$ff
             adc #0
             sta dy_int,x
+            rts
+
+:ball_done  jsr erase_appl
+            ldx appl_index
+            lda #0
+            sta state,x
+            dec applz_visible
             rts
 
 ;---------------------------------------
