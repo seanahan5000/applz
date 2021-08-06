@@ -134,14 +134,6 @@ block_grid  db -1, 1, 1, 0, 0, 0, 1, 1,-1
             db -1, 0, 0, 0, 2, 1, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
 
-;           db 1,1,2,2,1,1,1
-;           db 2,2,0,2,1,2,1
-;           db 1,2,1,1,1,2,0
-;           db 1,1,2,2,1,2,1
-;           db 1,2,1,2,1,1,1
-;           db 1,0,1,1,2,0,1
-;           db 1,2,1,2,1,2,2
-
 ;=======================================
 ; Aiming mode
 ;=======================================
@@ -180,7 +172,7 @@ aiming_mode lda #16         ;*** dot count
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
-            bcs :3
+            bcs :3              ; TODO: clamp a little more?
             ldy #2
 :3          cpy #253
             bcc :4
@@ -353,12 +345,12 @@ draw_dotz   ldx #1
             rts
 
 
-erase_dotz  lda #1
-            sta appl_index
-:1          jsr eor_dot
-            inc appl_index
-            lda appl_index
-            cmp dot_count
+erase_dotz  ldx #1
+:1          stx appl_index
+            jsr eor_dot
+            ldx appl_index
+            inx
+            cpx dot_count
             bne :1
             rts
 
@@ -380,16 +372,15 @@ update_dot  lda x_frac,x
             lda x_int,x
             sta oldx_int,x
             adc dx_int,x
-
-            cmp #21
-            bcc :reverse_x
-
-            cmp #grid_screen_width - 21 - ball_width
-            bcs :reverse_x
-
             sta x_int,x
 
-:update_y   lda y_frac,x
+            cmp #21
+            bcc :1
+            cmp #grid_screen_width - 21 - ball_width
+            bcc :2
+:1          jsr reflect_x
+:2
+            lda y_frac,x
             sta oldy_frac,x
             clc
             adc dy_frac,x
@@ -397,53 +388,8 @@ update_dot  lda x_frac,x
             lda y_int,x
             sta oldy_int,x
             adc dy_int,x
-
-            cmp #192-ball_height
-            bcs :reverse_y
-
             sta y_int,x
             rts
-
-:reverse_x  lda oldx_frac,x     ; back up to old x
-            sta x_frac,x
-            lda dx_frac,x       ; negate dx
-            eor #$ff
-            clc
-            adc #1
-            sta dx_frac,x
-            lda dx_int,x
-            eor #$ff
-            adc #0
-            sta dx_int,x
-            jmp :update_y
-
-:reverse_y  cmp #192+ball_height+1
-            bcc :ball_done
-
-            lda oldy_frac,x     ; back up to old y
-            sta y_frac,x
-            lda dy_frac,x       ; negate dy
-            eor #$ff
-            clc
-            adc #1
-            sta dy_frac,x
-            lda dy_int,x
-            eor #$ff
-            adc #0
-            sta dy_int,x
-            rts
-
-:ball_done  jsr erase_appl
-            ldx appl_index
-            lda #0
-            sta state,x
-            dec applz_visible
-            bne :1
-            lda applz_ready
-            bne :1
-            lda x_int,x         ; use final x for start/aim x
-            sta start_x
-:1          rts
 
 ;---------------------------------------
 ;
@@ -455,7 +401,9 @@ update_dot  lda x_frac,x
 ; on exit:
 ;   x: appl_index
 ;
-
+; NOTE: Reflection code is optimized for fall through path
+;   where all blocks are empty, since this is common case.
+;
 update_appl lda x_frac,x
             sta oldx_frac,x
             clc
@@ -505,21 +453,7 @@ update_appl lda x_frac,x
 
 :reverse_dy cmp #192+ball_height+1
             bcc :ball_done
-
-            lda oldy_frac,x     ; back up to old y
-            sta y_frac,x
-            lda oldy_int,x
-            sta y_int,x
-            lda dy_frac,x       ; negate dy
-            eor #$ff
-            clc
-            adc #1
-            sta dy_frac,x
-            lda dy_int,x
-            eor #$ff
-            adc #0
-            sta dy_int,x
-            lda y_int,x
+            jsr reflect_y
             jmp :post_reverse_d7
 
 ; remove ball off bottom of screen
@@ -554,7 +488,7 @@ left_right_y1
             bmi :left
             iny                 ; look at right edge
 :left       lda block_grid,y
-            bne reverse_dx
+            bne bounce_dx
             rts
 ;
 ; ball moving horizontally crossed vertical edge on two blocks
@@ -583,11 +517,11 @@ up_down_x1  lda grid_left
             bpl :down
 
 :up         lda block_grid,y
-            bne reverse_dy
+            bne bounce_dy
             rts
 
 :down       lda block_grid+grid_width,y
-            bne next_y_reverse_dy
+            bne next_y_bounce_dy
             rts
 
 diag_up     lda dx_int,x
@@ -604,16 +538,16 @@ diag_up     lda dx_int,x
             lda block_grid+grid_width+1,y
             bne :dfg
             lda block_grid,y
-            bne reverse_dy          ; case a,e
+            bne bounce_dy           ; case a,e
             iny
             lda block_grid,y
-            bne reverse_dx          ; case b (TODO: zero dy?)
+            bne bounce_dx           ; case b (TODO: zero dy?)
             rts
 :dfg        lda block_grid,y
             beq :df                 ; case d,f
-            jsr reverse_dy          ; case g
+            jsr reflect_y           ; case g
 :df         iny
-            bne next_y_reverse_dx   ; always
+            bne next_y_bounce_dx    ; always
 ;
 ;   a      b       c     d      e      f      g
 ; +-+      +-+                +-+-+  +-+    ..+-+
@@ -623,64 +557,37 @@ diag_up     lda dx_int,x
 ;                +-+                 +-+    +-+
 ;
 :diag_up_left
-            ; NOTE: optimized for fall through case where all blocks are empty
             lda block_grid+grid_width,y
             bne :cfg
             iny
             lda block_grid,y
-            bne reverse_dy          ; case b,e
+            bne bounce_dy           ; case b,e
             dey
             lda block_grid,y
-            bne reverse_dx          ; case a (TODO: zero dy?)
+            bne bounce_dx           ; case a (TODO: zero dy?)
             rts
 :cfg        lda block_grid+1,y
-            beq next_y_reverse_dx   ; case c,f
-            iny
-            jsr reverse_dy          ; case g
-            dey
-        ;   bne next_y_reverse_dx   ; always
+            beq next_y_bounce_dx    ; case c,f
+            jsr reflect_y           ; case g
+        ;   bne next_y_bounce_dx    ; always
 
-next_y_reverse_dx
+next_y_bounce_dx
             tya
-        ;   clc
+            clc
             adc #grid_width
             tay
-reverse_dx  lda oldx_frac,x     ; back up to old x
-            sta x_frac,x
-            lda oldx_int,x
-            sta x_int,x
-            lda dx_frac,x       ; negate dx
-            eor #$ff
-        ;   clc
-            adc #1
-            sta dx_frac,x
-            lda dx_int,x
-            eor #$ff
-            adc #0
-            sta dx_int,x
+bounce_dx   jsr reflect_x
             ;*** save/restore y
             ;*** decrement block count, remove block, etc ***
             ;*** watch out for border wall blocks ***
             rts
 
-next_y_reverse_dy
+next_y_bounce_dy
             tya
-        ;   clc
+            clc
             adc #grid_width
             tay
-reverse_dy  lda oldy_frac,x     ; back up to old y
-            sta y_frac,x
-            lda oldy_int,x
-            sta y_int,x
-            lda dy_frac,x       ; negate dy
-            eor #$ff
-        ;   clc
-            adc #1
-            sta dy_frac,x
-            lda dy_int,x
-            eor #$ff
-            adc #0
-            sta dy_int,x
+bounce_dy   jsr reflect_y
             ;*** save/restore y
             ;*** decrement block count, remove block, etc ***
             ;*** watch out for border wall blocks ***
@@ -700,18 +607,16 @@ diag_down   lda dx_int,x
             lda block_grid+1,y
             bne :bfg
             lda block_grid+grid_width,y
-            bne next_y_reverse_dy   ; case c,e
+            bne next_y_bounce_dy    ; case c,e
             iny
             lda block_grid+grid_width,y
-            bne next_y_reverse_dx   ; case d (TODO: zero dy?)
+            bne next_y_bounce_dx    ; case d (TODO: zero dy?)
             rts
 :bfg        lda block_grid+grid_width,y
             beq :bf                 ; case b,f
-            sty grid_top
-            jsr next_y_reverse_dy   ; case g
-            ldy grid_top
+            jsr reflect_y           ; case g
 :bf         iny
-            bne reverse_dx          ; always
+            bne bounce_dx           ; always
 ;
 ;   a      b       c     d      e      f      g
 ; +-+                                +-+    +-+
@@ -725,20 +630,56 @@ diag_down   lda dx_int,x
             bne :afg
             iny
             lda block_grid+grid_width,y
-            bne next_y_reverse_dy   ; case d,e
+            bne next_y_bounce_dy    ; case d,e
             dey
             lda block_grid+grid_width,y
-            bne next_y_reverse_dx   ; case c (TODO: zero dy?)
+            bne next_y_bounce_dx    ; case c (TODO: zero dy?)
             rts
 :afg        lda block_grid+grid_width+1,y
-            beq :af                 ; case a,f
-            sty grid_top
-            iny
-            jsr next_y_reverse_dy   ; case g
-            ldy grid_top
-:af         jmp reverse_dx
+            beq bounce_dx           ; case a,f
+            jsr reflect_y           ; case g
+            jmp bounce_dx
 
+;
+; reflect x/y,dx/dy without altering block counts
+;
+; on entry:
+;   x: ball index
+;   y: block index
+;
+; on exit:
+;   x: ball index
+;   y: block index
+;
+reflect_x   lda oldx_frac,x     ; back up to old x
+            sta x_frac,x
+            lda oldx_int,x
+            sta x_int,x
+            lda dx_frac,x       ; negate dx
+            eor #$ff
+            clc
+            adc #1
+            sta dx_frac,x
+            lda dx_int,x
+            eor #$ff
+            adc #0
+            sta dx_int,x
+            rts
 
+reflect_y   lda oldy_frac,x     ; back up to old y
+            sta y_frac,x
+            lda oldy_int,x
+            sta y_int,x
+            lda dy_frac,x       ; negate dy
+            eor #$ff
+            clc
+            adc #1
+            sta dy_frac,x
+            lda dy_int,x
+            eor #$ff
+            adc #0
+            sta dy_int,x
+            rts
 
 ; 0  21  42  63  84  105 126 147 168 189
 ; +---+---+---+---+---+---+---+---+---+
