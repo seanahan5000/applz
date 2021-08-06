@@ -1,19 +1,19 @@
 
 block_type1  = 1
 block_type2  = 2
-block_height = 18   ; excluding gap
+block_width  = 21   ; including gap
+block_height = 20   ; including gap
 block_gap    = 2
 
 ball_width  = 5
 ball_height = 5
 dot_height  = 3
 
-grid_screen_left = 9
-grid_screen_top = block_height + block_gap
-grid_width  = 7
-grid_height = 7
-grid_screen_width = grid_width * 3 * 7
-grid_size   = grid_width * grid_height
+grid_screen_left = 6    ; in bytes
+grid_screen_top  = 0  ;***block_height
+grid_width  = 9     ; includes left and right padding
+grid_height = 10    ; includes bottom dead space
+grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 
 send_delay  = 16
 
@@ -26,6 +26,7 @@ ycount      = $02
 applz_ready   = $10     ; applz ready but not yet launched
 applz_visible = $11     ; applz visible on screen (<= appl_slots)
 appl_slots    = $12     ; slots used in tables, both visible and complete
+
 appl_index  = $13
 dot_count   = $14
 
@@ -38,14 +39,19 @@ angle_dy_int  = $1a
 start_x     = $1b   ; variable position relative to grid edge
 send_countdown = $1c
 
-grid_col    = $30
-grid_row    = $31
-block_index = $32
-block_type  = $33
-block_color = $34
-block_top   = $35
-block_left  = $36
-block_bot   = $37
+grid_left   = $30
+grid_right  = $31
+grid_top    = $32
+grid_bottom = $33
+
+grid_col    = $34
+grid_row    = $35
+block_index = $36
+block_type  = $37
+block_color = $38
+block_top   = $39
+block_left  = $3a
+block_bot   = $3b
 
 screenl     = $20
 screenh     = $21
@@ -64,8 +70,6 @@ oldy_int    = $1a00
 dy_frac     = $1b00
 dy_int      = $1c00
 
-block_table = $0800
-
 ; TODO: use correct abbreviations
 keyboard    = $C000
 unstrobe    = $C010
@@ -82,6 +86,11 @@ PREAD       = $FB1E
 
 ; TODO:
 ;   - keyboard aiming support?
+;   - difficulty levels (aiming with richochet)
+;
+; PERF:
+;   - eor delta ball drawing
+;   - zpage old ball position instead of table
 
             org $6000
 
@@ -91,18 +100,47 @@ start       jsr clear1
             sta hires
             sta graphics
 
-            ; copy default table
-
-            ldx #grid_size-1
-:1          lda block_defaults,x
-            sta block_table,x
-            dex
-            bpl :1
-
             jsr draw_blocks
 
             lda #72
             sta start_x
+            jmp aiming_mode
+
+
+clear_grid  lda #grid_height
+            sta grid_row
+            lda #0
+            tay
+:1          iny
+            ldx #grid_width-2
+:2          sta block_grid,y
+            iny
+            dex
+            bne :2
+            iny
+            dec grid_row
+            bne :1
+            rts
+
+; TODO: page align
+block_grid  db -1, 1, 1, 0, 0, 0, 1, 1,-1
+            db -1, 1, 0, 2, 0, 0, 1, 0,-1
+            db -1, 2, 0, 0, 0, 0, 2, 1,-1
+            db -1, 0, 2, 1, 0, 0, 2, 0,-1
+            db -1, 1, 0, 0, 0, 1, 0, 1,-1
+            db -1, 1, 0, 1, 2, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 2, 0, 0,-1
+            db -1, 0, 0, 0, 2, 1, 0, 0,-1
+            db -1, 0, 0, 0, 2, 1, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+
+;           db 1,1,2,2,1,1,1
+;           db 2,2,0,2,1,2,1
+;           db 1,2,1,1,1,2,0
+;           db 1,1,2,2,1,2,1
+;           db 1,2,1,2,1,1,1
+;           db 1,0,1,1,2,0,1
+;           db 1,2,1,2,1,2,2
 
 ;=======================================
 ; Aiming mode
@@ -135,7 +173,7 @@ aiming_mode lda #16         ;*** dot count
             lda angle_dy_int
             sta dy_int
 
-            jsr draw_dots
+            jsr draw_dotz
 
 :2          bit pbutton0        ; check for paddle 0 button press
             bmi running_mode
@@ -151,7 +189,7 @@ aiming_mode lda #16         ;*** dot count
             beq :2              ; loop until something changes
             sty angle
 
-            jsr erase_dots
+            jsr erase_dotz
             jmp :1
 
 ;=======================================
@@ -162,7 +200,7 @@ running_mode
             ldx x_int
             lda y_int
             jsr eor_appl        ; erase aiming ball
-            jsr erase_dots
+            jsr erase_dotz
 
             lda #12             ;***
             sta applz_ready
@@ -172,6 +210,8 @@ running_mode
             sta applz_visible
             sta appl_slots
             beq :first          ; always
+
+            ; update and redraw visible applz
 
 :loop1      ldx #0
 :loop2      stx appl_index
@@ -199,6 +239,8 @@ running_mode
             inx
             cpx appl_slots
             bne :loop2
+
+            ; check for more applz to send
 
             lda applz_ready     ; check for applz left to send
             bne :5
@@ -261,12 +303,14 @@ running_mode
 
 ;---------------------------------------
 
+; TODO: scroll blocks down, add new blocks, check for game over
+
 level_mode
             jmp aiming_mode
 
 ;---------------------------------------
 
-draw_dots   ldx #1
+draw_dotz   ldx #1
 :1          stx appl_index
 
             ; copy dx and dy from previous dot
@@ -296,7 +340,7 @@ draw_dots   ldx #1
             lda #8
             sta grid_col            ;***
             ldx appl_index
-:2          jsr update_appl
+:2          jsr update_dot
             dec grid_col
             bne :2
 
@@ -309,7 +353,7 @@ draw_dots   ldx #1
             rts
 
 
-erase_dots  lda #1
+erase_dotz  lda #1
             sta appl_index
 :1          jsr eor_dot
             inc appl_index
@@ -320,7 +364,7 @@ erase_dots  lda #1
 
 ;---------------------------------------
 ;
-; update single appl position
+; update single dot position
 ;
 ; on entry:
 ;   x: appl_index
@@ -328,7 +372,7 @@ erase_dots  lda #1
 ; on exit:
 ;   x: appl_index
 ;
-update_appl lda x_frac,x
+update_dot  lda x_frac,x
             sta oldx_frac,x
             clc
             adc dx_frac,x
@@ -337,12 +381,15 @@ update_appl lda x_frac,x
             sta oldx_int,x
             adc dx_int,x
 
-            cmp #grid_screen_width - ball_width
-            bcs reverse_x
+            cmp #21
+            bcc :reverse_x
+
+            cmp #grid_screen_width - 21 - ball_width
+            bcs :reverse_x
 
             sta x_int,x
 
-update_y    lda y_frac,x
+:update_y   lda y_frac,x
             sta oldy_frac,x
             clc
             adc dy_frac,x
@@ -352,12 +399,12 @@ update_y    lda y_frac,x
             adc dy_int,x
 
             cmp #192-ball_height
-            bcs reverse_y
+            bcs :reverse_y
 
             sta y_int,x
             rts
 
-reverse_x   lda oldx_frac,x     ; back up to old x
+:reverse_x  lda oldx_frac,x     ; back up to old x
             sta x_frac,x
             lda dx_frac,x       ; negate dx
             eor #$ff
@@ -368,9 +415,9 @@ reverse_x   lda oldx_frac,x     ; back up to old x
             eor #$ff
             adc #0
             sta dx_int,x
-            jmp update_y
+            jmp :update_y
 
-reverse_y   cmp #192+ball_height+1
+:reverse_y  cmp #192+ball_height+1
             bcc :ball_done
 
             lda oldy_frac,x     ; back up to old y
@@ -391,7 +438,343 @@ reverse_y   cmp #192+ball_height+1
             lda #0
             sta state,x
             dec applz_visible
+            bne :1
+            lda applz_ready
+            bne :1
+            lda x_int,x         ; use final x for start/aim x
+            sta start_x
+:1          rts
+
+;---------------------------------------
+;
+; update single appl position
+;
+; on entry:
+;   x: appl_index
+;
+; on exit:
+;   x: appl_index
+;
+
+update_appl lda x_frac,x
+            sta oldx_frac,x
+            clc
+            adc dx_frac,x
+            sta x_frac,x
+            lda x_int,x
+            sta oldx_int,x
+            adc dx_int,x
+            sta x_int,x
+            tay
+            lda grid_x_table + 1,y
+            sta grid_left
+            lda grid_x_table + 1 + ball_width - 1,y
+            sec
+            sbc grid_left
+            sta grid_right
+
+            lda y_frac,x
+            sta oldy_frac,x
+            clc
+            adc dy_frac,x
+            sta y_frac,x
+            lda y_int,x
+            sta oldy_int,x
+            adc dy_int,x
+            sta y_int,x
+
+            cmp #192-ball_height    ; check for ball y wrapping
+            bcs :reverse_dy
+
+:post_reverse_d7
+            tay
+            lda grid_y_table + block_gap,y
+            sta grid_top
+            lda grid_y_table + ball_height - 1,y
+            sec
+            sbc grid_top
+            sta grid_bottom
+
+            lda grid_right
+            bne left_right      ; crossed vertical block edge
+            lda grid_bottom
+            bne up_down_x1      ; crossed horizontal block edge
+            rts                 ; TODO: loop here instead of jsr/rts
+
+; reflect ball at top of screen
+
+:reverse_dy cmp #192+ball_height+1
+            bcc :ball_done
+
+            lda oldy_frac,x     ; back up to old y
+            sta y_frac,x
+            lda oldy_int,x
+            sta y_int,x
+            lda dy_frac,x       ; negate dy
+            eor #$ff
+            clc
+            adc #1
+            sta dy_frac,x
+            lda dy_int,x
+            eor #$ff
+            adc #0
+            sta dy_int,x
+            lda y_int,x
+            jmp :post_reverse_d7
+
+; remove ball off bottom of screen
+
+:ball_done  jsr erase_appl
+            ldx appl_index
+            lda #0
+            sta state,x
+            dec applz_visible
+            bne :1
+            lda applz_ready
+            bne :1
+            lda x_int,x         ; use final x for start/aim x
+            sta start_x
+:1          rts
+
+left_right  lda grid_bottom
+            bne left_right_y2   ; crossing two blocks vertically
+;
+; ball moving horizontally crossed vertical edge on single block
+;
+;   +-+   +-+
+;  OO |   | OO
+;   +-+   +-+
+;
+left_right_y1
+            lda grid_left
+            clc
+            adc grid_top
+            tay
+            lda dx_int,x        ; moving left or right?
+            bmi :left
+            iny                 ; look at right edge
+:left       lda block_grid,y
+            bne reverse_dx
             rts
+;
+; ball moving horizontally crossed vertical edge on two blocks
+;
+left_right_y2
+            lda grid_left
+            clc
+            adc grid_top
+            tay
+            lda dy_int,x
+            bmi diag_up
+            jmp diag_down
+;
+; ball moving vertically crossed horizontal edge on single block
+;
+;   +-+   O
+;   | |  +O+
+;   +O+  | |
+;    O   +-+
+;
+up_down_x1  lda grid_left
+            clc
+            adc grid_top
+            tay
+            lda dy_int,x
+            bpl :down
+
+:up         lda block_grid,y
+            bne reverse_dy
+            rts
+
+:down       lda block_grid+grid_width,y
+            bne next_y_reverse_dy
+            rts
+
+diag_up     lda dx_int,x
+            bmi :diag_up_left
+;
+;   a      b      c      d      e      f      g
+; +-+      +-+                +-+-+    +-+  +-+..
+; | |      | |                | | |    | |  | | .
+; +-O      O-+           O-+  +-O-+    O-+  +-O-+
+;  O      O             O| |   O      O| |   O| |
+;                        +-+           +-+    +-+
+;
+:diag_up_right
+            lda block_grid+grid_width+1,y
+            bne :dfg
+            lda block_grid,y
+            bne reverse_dy          ; case a,e
+            iny
+            lda block_grid,y
+            bne reverse_dx          ; case b (TODO: zero dy?)
+            rts
+:dfg        lda block_grid,y
+            beq :df                 ; case d,f
+            jsr reverse_dy          ; case g
+:df         iny
+            bne next_y_reverse_dx   ; always
+;
+;   a      b       c     d      e      f      g
+; +-+      +-+                +-+-+  +-+    ..+-+
+; | |      | |                | | |  | |    . | |
+; +-O      O-+   +-O          +-O-+  +-O    +-O-+
+;    O      O    | |O            O   | |O   | |O
+;                +-+                 +-+    +-+
+;
+:diag_up_left
+            ; NOTE: optimized for fall through case where all blocks are empty
+            lda block_grid+grid_width,y
+            bne :cfg
+            iny
+            lda block_grid,y
+            bne reverse_dy          ; case b,e
+            dey
+            lda block_grid,y
+            bne reverse_dx          ; case a (TODO: zero dy?)
+            rts
+:cfg        lda block_grid+1,y
+            beq next_y_reverse_dx   ; case c,f
+            iny
+            jsr reverse_dy          ; case g
+            dey
+        ;   bne next_y_reverse_dx   ; always
+
+next_y_reverse_dx
+            tya
+        ;   clc
+            adc #grid_width
+            tay
+reverse_dx  lda oldx_frac,x     ; back up to old x
+            sta x_frac,x
+            lda oldx_int,x
+            sta x_int,x
+            lda dx_frac,x       ; negate dx
+            eor #$ff
+        ;   clc
+            adc #1
+            sta dx_frac,x
+            lda dx_int,x
+            eor #$ff
+            adc #0
+            sta dx_int,x
+            ;*** save/restore y
+            ;*** decrement block count, remove block, etc ***
+            ;*** watch out for border wall blocks ***
+            rts
+
+next_y_reverse_dy
+            tya
+        ;   clc
+            adc #grid_width
+            tay
+reverse_dy  lda oldy_frac,x     ; back up to old y
+            sta y_frac,x
+            lda oldy_int,x
+            sta y_int,x
+            lda dy_frac,x       ; negate dy
+            eor #$ff
+        ;   clc
+            adc #1
+            sta dy_frac,x
+            lda dy_int,x
+            eor #$ff
+            adc #0
+            sta dy_int,x
+            ;*** save/restore y
+            ;*** decrement block count, remove block, etc ***
+            ;*** watch out for border wall blocks ***
+            rts
+
+diag_down   lda dx_int,x
+            bmi :diag_down_left
+;
+;   a      b       c     d      e      f      g
+;          +-+                         +-+    +-+
+;         O| |    O     O      O      O| |   O| |
+;          O-+   +-O     O-+  +-O-+    O-+  +-O-+
+;                | |     | |  | | |    | |  | | .
+;                +-+     +-+  +-+-+    +-+  +-+..
+;
+:diag_down_right
+            lda block_grid+1,y
+            bne :bfg
+            lda block_grid+grid_width,y
+            bne next_y_reverse_dy   ; case c,e
+            iny
+            lda block_grid+grid_width,y
+            bne next_y_reverse_dx   ; case d (TODO: zero dy?)
+            rts
+:bfg        lda block_grid+grid_width,y
+            beq :bf                 ; case b,f
+            sty grid_top
+            jsr next_y_reverse_dy   ; case g
+            ldy grid_top
+:bf         iny
+            bne reverse_dx          ; always
+;
+;   a      b       c     d      e      f      g
+; +-+                                +-+    +-+
+; | |O              O     O      O   | |O   | |O
+; +-O            +-O     O-+  +-O-+  +-O    +-O-+
+;                | |     | |  | | |  | |    . | |
+;                +-+     +-+  +-+-+  +-+    ..+-+
+;
+:diag_down_left
+            lda block_grid,y
+            bne :afg
+            iny
+            lda block_grid+grid_width,y
+            bne next_y_reverse_dy   ; case d,e
+            dey
+            lda block_grid+grid_width,y
+            bne next_y_reverse_dx   ; case c (TODO: zero dy?)
+            rts
+:afg        lda block_grid+grid_width+1,y
+            beq :af                 ; case a,f
+            sty grid_top
+            iny
+            jsr next_y_reverse_dy   ; case g
+            ldy grid_top
+:af         jmp reverse_dx
+
+
+
+; 0  21  42  63  84  105 126 147 168 189
+; +---+---+---+---+---+---+---+---+---+
+;   0   1   2   3   4   5   6   7   8
+
+; divide by 21 table to convert x position into grid column
+; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
+            ds  \,0
+grid_x_table
+            ds  block_width,0
+            ds  block_width,1
+            ds  block_width,2
+            ds  block_width,3
+            ds  block_width,4
+            ds  block_width,5
+            ds  block_width,6
+            ds  block_width,7
+            ds  block_width,8
+            ;*** 0 instead? ***
+
+; divide by 20 * grid_width table to convert y position into grid row offset
+; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
+            ds  \,0
+grid_y_table
+            ds  block_height,0*grid_width
+            ds  block_height,1*grid_width
+            ds  block_height,2*grid_width
+            ds  block_height,3*grid_width
+            ds  block_height,4*grid_width
+            ds  block_height,5*grid_width
+            ds  block_height,6*grid_width
+            ds  block_height,7*grid_width
+            ds  block_height,8*grid_width
+            ds  block_height,9*grid_width
+            ds  block_height,10*grid_width
+            ;*** 0*9 instead? ***
 
 ;---------------------------------------
 ;
@@ -463,34 +846,16 @@ sine_table  hex 000306090c0f1215
 
 ;---------------------------------------
 
-; TODO: remove these
-block_defaults
-        do 0
-            db 1,1,2,2,1,1,1
-            db 2,2,0,2,1,2,1
-            db 1,2,1,1,1,2,0
-            db 1,1,2,2,1,2,1
-            db 1,2,1,2,1,1,1
-            db 1,0,1,1,2,0,1
-            db 1,2,1,2,1,2,2
-        else
-            db 1,0,2,0,0,1,0
-            db 2,0,0,0,0,2,1
-            db 0,2,1,0,0,2,0
-            db 1,0,0,0,1,0,1
-            db 1,0,1,2,0,0,0
-            db 0,0,0,0,2,0,0
-            db 0,0,0,2,1,0,0
-        fin
 ;
-; draw all blocks in grid using block_table
+; draw all blocks in grid using block_grid
 ;
 draw_blocks ldx #0
             stx grid_col
             stx grid_row
 :1          stx block_index
-            lda block_table,x
+            lda block_grid,x
             beq :2              ; skip empty blocks
+            bmi :2              ; TODO: maybe get rid of?
             ldx grid_col
             ldy grid_row
             jsr draw_block
@@ -503,7 +868,7 @@ draw_blocks ldx #0
 :3          stx grid_col
             ldx block_index
             inx
-            cpx #grid_size
+            cpx #grid_width * grid_height
             bne :1
             rts
 
@@ -534,18 +899,18 @@ draw_block  stx grid_col
             adc #grid_screen_left
             sta block_left
 
-            ; block_y = (grid_row * (block_height + block_gap)) + grid_screen_top
+            ; block_y = (grid_row * block_height) + grid_screen_top
             ; TODO: could use a table instead
 
             lda #grid_screen_top
             clc
             ldy grid_row
             beq :3
-:2          adc #block_height+block_gap
+:2          adc #block_height
             dey
             bne :2
 :3          sta block_top
-            adc #block_height
+            adc #block_height-block_gap
             sta block_bot
 
             ; fill the block
@@ -698,7 +1063,7 @@ dotz_lo     db  #<dot0
             db  #<dot5
             db  #<dot6
 
-            ds  \,$ee
+            ds  \,0
 
 appl0       db  %00001110, %00000000
             db  %00011111, %00000000
@@ -785,6 +1150,8 @@ dot6        db  %00000000, %00000000
             db  %00000000, %00000000
             db  %00000000, %00000000
 
+            ds  \,0
+
 div7        hex 00000000000000
             hex 01010101010101
             hex 02020202020202
@@ -822,6 +1189,8 @@ div7        hex 00000000000000
             hex 22222222222222
             hex 23232323232323
             hex 24242424
+
+            ds  \,0
 
 mod7        hex 00010203040506
             hex 00010203040506
@@ -861,6 +1230,8 @@ mod7        hex 00010203040506
             hex 00010203040506
             hex 00010203
 
+            ds  \,0
+
 hires_table_lo
             hex 0000000000000000
             hex 8080808080808080
@@ -886,6 +1257,8 @@ hires_table_lo
             hex d0d0d0d0d0d0d0d0
             hex 5050505050505050
             hex d0d0d0d0d0d0d0d0
+
+            ds  \,0
 
 hires_table_hi
             hex 2024282c3034383c
