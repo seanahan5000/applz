@@ -13,9 +13,12 @@ grid_screen_left = 6    ; in bytes
 grid_screen_top  = 0  ;***block_height
 grid_width  = 9     ; includes left and right padding
 grid_height = 10    ; includes bottom dead space
+grid_size   = grid_width * grid_height
 grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 
 send_delay  = 16
+
+scroll_delta = 4        ; number of lines stepped per grid scroll
 
 start_y     = 192 - ball_height
 
@@ -55,6 +58,8 @@ block_bot   = $3b
 
 screenl     = $20
 screenh     = $21
+sourcel     = $22
+sourceh     = $23
 
 state       = $1000 ; high bit set when visible/active
 x_frac      = $1100
@@ -106,6 +111,7 @@ start       jsr clear1
             sta start_x
             jmp aiming_mode
 
+; TODO: move this code down lower in file
 
 clear_grid  lda #grid_height
             sta grid_row
@@ -114,12 +120,30 @@ clear_grid  lda #grid_height
 :1          iny
             ldx #grid_width-2
 :2          sta block_grid,y
+            sta block_counts,y
             iny
             dex
             bne :2
             iny
             dec grid_row
             bne :1
+            rts
+
+scroll_blocks
+            ldy #grid_size-grid_width-1
+:1          lda block_grid,y
+            sta block_grid+grid_width,y
+            lda block_counts,y
+            sta block_counts+grid_width,y
+            dey
+            bpl :1
+
+            ldy #grid_width-2
+            lda #0
+:2          sta block_grid,y
+            sta block_counts,y
+            dey
+            bne :2
             rts
 
 ; TODO: page align
@@ -133,6 +157,18 @@ block_grid  db -1, 1, 1, 0, 0, 0, 1, 1,-1
             db -1, 0, 0, 0, 2, 1, 0, 0,-1
             db -1, 0, 0, 0, 2, 1, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
+
+block_counts
+            db  0, 1, 1, 0, 0, 0, 1, 1,0
+            db  0, 1, 0, 2, 0, 0, 1, 0,0
+            db  0, 2, 0, 0, 0, 0, 2, 1,0
+            db  0, 0, 2, 1, 0, 0, 2, 0,0
+            db  0, 1, 0, 0, 0, 1, 0, 1,0
+            db  0, 1, 0, 1, 2, 0, 0, 0,0
+            db  0, 0, 0, 0, 0, 2, 0, 0,0
+            db  0, 0, 0, 0, 2, 1, 0, 0,0
+            db  0, 0, 0, 0, 2, 1, 0, 0,0
+            db  0, 0, 0, 0, 0, 0, 0, 0,0
 
 ;=======================================
 ; Aiming mode
@@ -298,6 +334,9 @@ running_mode
 ; TODO: scroll blocks down, add new blocks, check for game over
 
 level_mode
+            jsr scroll_blocks
+            jsr scroll_screen_grid
+
             jmp aiming_mode
 
 ;---------------------------------------
@@ -577,10 +616,7 @@ next_y_bounce_dx
             adc #grid_width
             tay
 bounce_dx   jsr reflect_x
-            ;*** save/restore y
-            ;*** decrement block count, remove block, etc ***
-            ;*** watch out for border wall blocks ***
-            rts
+            jmp bounce_block
 
 next_y_bounce_dy
             tya
@@ -588,10 +624,7 @@ next_y_bounce_dy
             adc #grid_width
             tay
 bounce_dy   jsr reflect_y
-            ;*** save/restore y
-            ;*** decrement block count, remove block, etc ***
-            ;*** watch out for border wall blocks ***
-            rts
+            jmp bounce_block
 
 diag_down   lda dx_int,x
             bmi :diag_down_left
@@ -681,9 +714,30 @@ reflect_y   lda oldy_frac,x     ; back up to old y
             sta dy_int,x
             rts
 
-; 0  21  42  63  84  105 126 147 168 189
-; +---+---+---+---+---+---+---+---+---+
-;   0   1   2   3   4   5   6   7   8
+;
+; handle hitting block
+;
+; on entry:
+;   x: ball index
+;
+; on exit:
+;   x: ball index
+;
+bounce_block
+            lda block_counts,y
+            beq :1              ; border blocks have zero count
+            sec
+            sbc #1
+            sta block_counts,y
+            bne :1
+            lda #0
+            sta block_grid,y
+
+            jsr erase_block
+            ldx appl_index
+
+:1          rts
+
 
 ; divide by 21 table to convert x position into grid column
 ; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
@@ -716,6 +770,56 @@ grid_y_table
             ds  block_height,9*grid_width
             ds  block_height,10*grid_width
             ;*** 0*9 instead? ***
+
+;---------------------------------------
+;
+; scroll all visible grid blocks down by one on screen
+;
+scroll_screen_grid
+            lda #block_height/scroll_delta
+            sta grid_row
+:1          ldx #191
+:2          lda hires_table_lo,x
+            clc
+            adc #grid_screen_left+3
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+
+            lda hires_table_lo-scroll_delta,x
+        ;   clc
+            adc #grid_screen_left+3
+            sta sourcel
+            lda hires_table_hi-scroll_delta,x
+            sta sourceh
+
+            ldy #grid_width-2*3-1
+:3          lda (sourcel),y
+            sta (screenl),y
+            dey
+            bpl :3
+
+            dex
+            cpx #scroll_delta-1
+            bne :2
+
+:4          lda hires_table_lo,x
+            clc
+            adc #grid_screen_left+3
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            ldy #grid_width-2*3-1
+            lda #0
+:5          sta (screenl),y
+            dey
+            bpl :5
+            dex
+            bpl :4
+
+            dec grid_row
+            bne :1
+            rts
 
 ;---------------------------------------
 ;
@@ -786,79 +890,41 @@ sine_table  hex 000306090c0f1215
             hex feffffffffffffff
 
 ;---------------------------------------
-
 ;
 ; draw all blocks in grid using block_grid
 ;
-draw_blocks ldx #0
-            stx grid_col
-            stx grid_row
-:1          stx block_index
-            lda block_grid,x
+draw_blocks ldy #0
+:1          sty block_index
+            lda block_grid,y
             beq :2              ; skip empty blocks
             bmi :2              ; TODO: maybe get rid of?
-            ldx grid_col
-            ldy grid_row
             jsr draw_block
-:2          ldx grid_col
-            inx
-            cpx #grid_width
-            bne :3
-            inc grid_row
-            ldx #0
-:3          stx grid_col
-            ldx block_index
-            inx
-            cpx #grid_width * grid_height
+:2          ldy block_index
+            iny
+            cpy #grid_size
             bne :1
             rts
-
 ;
 ; on entry
-;   x: grid column of block
-;   y: grid row of block
+;   y: grid index of block
 ;   a: block type
 ;
-draw_block  stx grid_col
-            sty grid_row
-            sta block_type
-            tax
-
-            ; choose color based on column and block type
-
-            lda #$d5
-            cpx #block_type2
+draw_block
+            ; choose color based on block type
+            ldx #$d5
+            cmp #block_type2
             bne :1
-            eor #$80
-:1          sta block_color
+            ldx #$55
+:1          stx block_color
 
-            ; block_x = (grid_col * 3) + grid_screen_left
-
-            lda grid_col
-            asl a
-            adc grid_col
-            adc #grid_screen_left
-            sta block_left
-
-            ; block_y = (grid_row * block_height) + grid_screen_top
-            ; TODO: could use a table instead
-
-            lda #grid_screen_top
+            lda grid_screen_rows,y
+            tax
             clc
-            ldy grid_row
-            beq :3
-:2          adc #block_height
-            dey
-            bne :2
-:3          sta block_top
             adc #block_height-block_gap
             sta block_bot
-
-            ; fill the block
-
-            ldx block_top
-            ldy block_left
-:4          lda hires_table_lo,x
+            lda grid_screen_cols,y
+            tay
+:2          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -875,9 +941,69 @@ draw_block  stx grid_col
             dey
             inx
             cpx block_bot
-            bne :4
+            bne :2
+            rts
+;
+; on entry
+;   y: grid index of block
+;
+erase_block
+            lda grid_screen_rows,y
+            tax
+            clc
+            adc #block_height-block_gap
+            sta block_bot
+            lda grid_screen_cols,y
+            tay
+:1          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            lda #0
+            sta (screenl),y
+            iny
+            sta (screenl),y
+            iny
+            lda (screenl),y
+            and #$60
+            sta (screenl),y
+            dey
+            dey
+            inx
+            cpx block_bot
+            bne :1
             rts
 
+            err grid_height-10
+            err block_height-20
+            err grid_screen_top-0
+
+grid_screen_rows
+            ds  grid_width,0
+            ds  grid_width,20
+            ds  grid_width,40
+            ds  grid_width,60
+            ds  grid_width,80
+            ds  grid_width,100
+            ds  grid_width,120
+            ds  grid_width,140
+            ds  grid_width,160
+            ds  grid_width,180
+
+            err grid_screen_left-6
+            err block_width-21
+
+grid_screen_cols
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
+            db  6,9,12,15,18,21,24,27,30
 ;
 ; eor the dot shape
 ;
