@@ -39,8 +39,11 @@ angle_dx_int  = $18
 angle_dy_frac = $19
 angle_dy_int  = $1a
 
-start_x     = $1b   ; variable position relative to grid edge
+start_x     = $1b       ; variable position relative to grid edge
 send_countdown = $1c
+
+wave        = $1e
+appl_count  = $1f       ; total number of applz the player has collected
 
 grid_left   = $30
 grid_right  = $31
@@ -60,8 +63,10 @@ screenl     = $20
 screenh     = $21
 sourcel     = $22
 sourceh     = $23
+seed0       = $24
+seed1       = $25
 
-state       = $1000 ; high bit set when visible/active
+state       = $1000     ; high bit set when visible/active
 x_frac      = $1100
 x_int       = $1200
 oldx_frac   = $1300
@@ -91,25 +96,65 @@ PREAD       = $FB1E
 
 ; TODO:
 ;   - keyboard aiming support?
-;   - difficulty levels (aiming with richochet)
+;   - remove aiming richochet
 ;
 ; PERF:
 ;   - eor delta ball drawing
 ;   - zpage old ball position instead of table
+;   - double dx/dy values
+;   - throttle ball redraw rate
 
             org $6000
 
-start       jsr clear1
+start
+            ; init random number seed values
+
+            lda #$12
+            sta seed0
+            lda #$34
+            sta seed1
+
+            lda #1
+            sta wave
+            sta appl_count
+
+            jsr draw_screen
+
             sta primary
             sta fullscreen
             sta hires
             sta graphics
 
+            lda #72         ;*** use a constant ***
+            sta start_x
+
+            jmp first_wave_mode
+
+
+draw_screen jsr clear1
             jsr draw_blocks
 
-            lda #72
-            sta start_x
-            jmp aiming_mode
+            ; draw bars on left and right of grid
+
+            ldx #0
+:1          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+
+            ldy #grid_screen_left+2
+            lda #$18
+            sta (screenl),y
+
+            ldy #grid_width*3-3+grid_screen_left
+            lda #$03
+            sta (screenl),y
+
+            inx
+            cpx #192
+            bne :1
+
+            rts
 
 ; TODO: move this code down lower in file
 
@@ -147,7 +192,19 @@ scroll_blocks
             rts
 
 ; TODO: page align
-block_grid  db -1, 1, 1, 0, 0, 0, 1, 1,-1
+block_grid  db -1, 0, 0, 0, 0, 0, 0, 0,-1
+    do 1
+            ; TODO: set -1 as part of clear
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+    else
             db -1, 1, 0, 2, 0, 0, 1, 0,-1
             db -1, 2, 0, 0, 0, 0, 2, 1,-1
             db -1, 0, 2, 1, 0, 0, 2, 0,-1
@@ -157,18 +214,83 @@ block_grid  db -1, 1, 1, 0, 0, 0, 1, 1,-1
             db -1, 0, 0, 0, 2, 1, 0, 0,-1
             db -1, 0, 0, 0, 2, 1, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
+    fin
 
 block_counts
-            db  0, 1, 1, 0, 0, 0, 1, 1,0
-            db  0, 1, 0, 2, 0, 0, 1, 0,0
-            db  0, 2, 0, 0, 0, 0, 2, 1,0
-            db  0, 0, 2, 1, 0, 0, 2, 0,0
-            db  0, 1, 0, 0, 0, 1, 0, 1,0
-            db  0, 1, 0, 1, 2, 0, 0, 0,0
-            db  0, 0, 0, 0, 0, 2, 0, 0,0
-            db  0, 0, 0, 0, 2, 1, 0, 0,0
-            db  0, 0, 0, 0, 2, 1, 0, 0,0
-            db  0, 0, 0, 0, 0, 0, 0, 0,0
+    do 1
+            ds grid_size,0
+    else
+            db  0, 0, 0, 0, 0, 0, 0, 0, 0
+            db  0, 1, 0, 2, 0, 0, 1, 0, 0
+            db  0, 2, 0, 0, 0, 0, 2, 1, 0
+            db  0, 0, 2, 1, 0, 0, 2, 0, 0
+            db  0, 1, 0, 0, 0, 1, 0, 1, 0
+            db  0, 1, 0, 1, 2, 0, 0, 0, 0
+            db  0, 0, 0, 0, 0, 2, 0, 0, 0
+            db  0, 0, 0, 0, 2, 1, 0, 0, 0
+            db  0, 0, 0, 0, 2, 1, 0, 0, 0
+            db  0, 0, 0, 0, 0, 0, 0, 0, 0
+    fin
+
+;=======================================
+; Wave mode
+;=======================================
+
+; TODO: scroll blocks down, add new blocks, check for game over
+;*** first time through, random number will always be the same
+
+next_wave_mode
+            ldx wave
+            cpx #255            ; cap wave at 255
+            bcs :1
+            inx
+:1          stx wave
+            stx appl_count      ; TODO: for now, bump applz along with wave
+
+first_wave_mode
+
+            ; get number of blocks to create, from 2 to 6
+
+:1          jsr random
+            tax
+            lda mod7,x
+            cmp #2
+            bcc :1
+            sta block_index
+
+            ; create new blocks on top row, allowing at most one block double-up
+
+:2          jsr random
+            tax
+            ldy mod7,x
+            lda block_counts+1,Y
+            beq :3
+            cmp wave
+            bcs :2
+:3          clc
+            adc wave
+            sta block_counts+1,y
+            lda #block_type1        ; TODO: pick block_type2
+            sta block_grid+1,y
+            dec block_index
+            bne :2
+
+            ; draw new blocks on top row
+
+            ldy #1
+:4          sty block_index
+            lda block_grid,y
+            beq :5
+            jsr draw_block
+            ldy block_index
+:5          iny
+            cpy #grid_width-1
+            bne :4
+
+            jsr scroll_blocks
+            jsr scroll_screen_grid
+
+            ; fall through
 
 ;=======================================
 ; Aiming mode
@@ -218,6 +340,8 @@ aiming_mode lda #16         ;*** dot count
             sty angle
 
             jsr erase_dotz
+
+            jsr random          ; update random number on input change
             jmp :1
 
 ;=======================================
@@ -230,7 +354,7 @@ running_mode
             jsr eor_appl        ; erase aiming ball
             jsr erase_dotz
 
-            lda #12             ;***
+            lda appl_count
             sta applz_ready
             lda #1
             sta send_countdown
@@ -274,7 +398,7 @@ running_mode
             bne :5
             lda applz_visible
             bne :loop1
-            beq level_mode      ; always
+            jmp next_wave_mode
 
 :5          dec send_countdown  ; check if it has been long enough to send
             bne :loop1
@@ -328,16 +452,6 @@ running_mode
             lda #send_delay     ; reset send delay countdown
             sta send_countdown
             jmp :loop1
-
-;---------------------------------------
-
-; TODO: scroll blocks down, add new blocks, check for game over
-
-level_mode
-            jsr scroll_blocks
-            jsr scroll_screen_grid
-
-            jmp aiming_mode
 
 ;---------------------------------------
 
@@ -413,6 +527,7 @@ update_dot  lda x_frac,x
             adc dx_int,x
             sta x_int,x
 
+            ;*** get rid of ricochet
             cmp #21
             bcc :1
             cmp #grid_screen_width - 21 - ball_width
@@ -1073,6 +1188,36 @@ eor_loop    ldy ypos
             bne eor_loop
             rts
 
+; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
+; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
+;   Assumes seed0 and seed1 zpage values have been initialized.
+;   35 bytes, 69 cycles
+
+random      lda seed1
+            tay
+            lsr
+            lsr
+            lsr
+            sta seed1
+            lsr
+            eor seed1
+            lsr
+            eor seed1
+            eor seed0
+            sta seed1
+            tya
+            sta seed0
+            asl
+            eor seed0
+            asl
+            eor seed0
+            asl
+            asl
+            asl
+            eor seed0
+            sta seed0
+            rts
+
 ;
 ; clear primary screen to black
 ;
@@ -1352,4 +1497,3 @@ hires_table_hi
             hex 22262a2e32363a3e
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
-
