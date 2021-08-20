@@ -1,4 +1,6 @@
 
+double_speed = 1
+
 block_type1  = 1
 block_type2  = 2
 block_width  = 21   ; including gap
@@ -16,22 +18,35 @@ grid_height = 10    ; includes bottom dead space
 grid_size   = grid_width * grid_height
 grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 
+wave_x      = 31
+wave_y      = 20
+
+        do double_speed
+send_delay  = 8
+        else
 send_delay  = 16
+        fin
 
 scroll_delta = 4        ; number of lines stepped per grid scroll
 
 start_y     = 192 - ball_height
 
-xpos        = $00
-ypos        = $01
-ycount      = $02
+temp          = $00
+xpos          = $01
+ypos          = $02
+ycount        = $03
+
+textl         = $04
+texth         = $05
+text_index    = $06
+text_length   = $07
 
 applz_ready   = $10     ; applz ready but not yet launched
 applz_visible = $11     ; applz visible on screen (<= appl_slots)
 appl_slots    = $12     ; slots used in tables, both visible and complete
 
-appl_index  = $13
-dot_count   = $14
+appl_index    = $13
+dot_count     = $14
 
 angle         = $16
 angle_dx_frac = $17
@@ -39,11 +54,17 @@ angle_dx_int  = $18
 angle_dy_frac = $19
 angle_dy_int  = $1a
 
-start_x     = $1b       ; variable position relative to grid edge
+start_x       = $1b     ; variable position relative to grid edge
 send_countdown = $1c
 
-wave        = $1e
 appl_count  = $1f       ; total number of applz the player has collected
+
+screenl     = $20
+screenh     = $21
+sourcel     = $22
+sourceh     = $23
+seed0       = $24
+seed1       = $25
 
 grid_left   = $30
 grid_right  = $31
@@ -59,12 +80,9 @@ block_top   = $39
 block_left  = $3a
 block_bot   = $3b
 
-screenl     = $20
-screenh     = $21
-sourcel     = $22
-sourceh     = $23
-seed0       = $24
-seed1       = $25
+wave_bcd0   = $40
+wave_bcd1   = $41
+wave_index  = $42
 
 state       = $1000     ; high bit set when visible/active
 x_frac      = $1100
@@ -115,46 +133,36 @@ start
             sta seed1
 
             lda #1
-            sta wave
+            sta wave_bcd0
+            sta wave_index
             sta appl_count
 
-            jsr draw_screen
+            lda #0
+            sta wave_bcd1
+
+            jsr clear1
+            jsr erase_screen_grid
 
             sta primary
             sta fullscreen
             sta hires
             sta graphics
 
+            ; draw "wave:"
+
+            ldx #wave_x
+            ldy #wave_y
+            jsr set_text_xy
+            ldx #<wave_str
+            ldy #>wave_str
+            jsr draw_string
+
             lda #72         ;*** use a constant ***
             sta start_x
 
             jmp first_wave_mode
 
-
-draw_screen jsr clear1
-            jsr draw_blocks
-
-            ; draw bars on left and right of grid
-
-            ldx #0
-:1          lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-
-            ldy #grid_screen_left+2
-            lda #$18
-            sta (screenl),y
-
-            ldy #grid_width*3-3+grid_screen_left
-            lda #$03
-            sta (screenl),y
-
-            inx
-            cpx #192
-            bne :1
-
-            rts
+wave_str    STR "WAVE:"
 
 ; TODO: move this code down lower in file
 
@@ -193,7 +201,6 @@ scroll_blocks
 
 ; TODO: page align
 block_grid  db -1, 0, 0, 0, 0, 0, 0, 0,-1
-    do 1
             ; TODO: set -1 as part of clear
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
@@ -204,50 +211,45 @@ block_grid  db -1, 0, 0, 0, 0, 0, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
             db -1, 0, 0, 0, 0, 0, 0, 0,-1
-    else
-            db -1, 1, 0, 2, 0, 0, 1, 0,-1
-            db -1, 2, 0, 0, 0, 0, 2, 1,-1
-            db -1, 0, 2, 1, 0, 0, 2, 0,-1
-            db -1, 1, 0, 0, 0, 1, 0, 1,-1
-            db -1, 1, 0, 1, 2, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 2, 0, 0,-1
-            db -1, 0, 0, 0, 2, 1, 0, 0,-1
-            db -1, 0, 0, 0, 2, 1, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-    fin
 
 block_counts
-    do 1
             ds grid_size,0
-    else
-            db  0, 0, 0, 0, 0, 0, 0, 0, 0
-            db  0, 1, 0, 2, 0, 0, 1, 0, 0
-            db  0, 2, 0, 0, 0, 0, 2, 1, 0
-            db  0, 0, 2, 1, 0, 0, 2, 0, 0
-            db  0, 1, 0, 0, 0, 1, 0, 1, 0
-            db  0, 1, 0, 1, 2, 0, 0, 0, 0
-            db  0, 0, 0, 0, 0, 2, 0, 0, 0
-            db  0, 0, 0, 0, 2, 1, 0, 0, 0
-            db  0, 0, 0, 0, 2, 1, 0, 0, 0
-            db  0, 0, 0, 0, 0, 0, 0, 0, 0
-    fin
 
 ;=======================================
 ; Wave mode
 ;=======================================
 
-; TODO: scroll blocks down, add new blocks, check for game over
+; TODO: check for game over
 ;*** first time through, random number will always be the same
 
 next_wave_mode
-            ldx wave
+            ldx wave_index
             cpx #255            ; cap wave at 255
             bcs :1
             inx
-:1          stx wave
+            sed
+            lda wave_bcd0
+        ;   clc
+            adc #1
+            sta wave_bcd0
+            lda wave_bcd1
+            adc #0
+            sta wave_bcd1
+            cld
+:1          stx wave_index
             stx appl_count      ; TODO: for now, bump applz along with wave
 
 first_wave_mode
+
+            ; draw wave number
+
+            ldx #wave_x+5
+            ldy #wave_y
+            jsr set_text_xy
+            lda wave_bcd1
+            jsr draw_number
+            lda wave_bcd0
+            jsr draw_number
 
             ; get number of blocks to create, from 2 to 6
 
@@ -265,10 +267,10 @@ first_wave_mode
             ldy mod7,x
             lda block_counts+1,Y
             beq :3
-            cmp wave
+            cmp wave_index
             bcs :2
 :3          clc
-            adc wave
+            adc wave_index
             sta block_counts+1,y
             lda #block_type1        ; TODO: pick block_type2
             sta block_grid+1,y
@@ -341,7 +343,8 @@ aiming_mode lda #16         ;*** dot count
 
             jsr erase_dotz
 
-            jsr random          ; update random number on input change
+            ;*** keep disabled while debugging
+            ;jsr random          ; update random number on input change
             jmp :1
 
 ;=======================================
@@ -376,6 +379,8 @@ running_mode
             lda state,x         ; newly complete?
             bpl :skip4
 
+        do double_speed
+        else
             lda x_int,x         ; check for change in x position
             cmp oldx_int,x
             bne :skip3
@@ -383,6 +388,7 @@ running_mode
             lda y_int,x         ; check for change in y position
             cmp oldy_int,x
             beq :skip4
+        fin
 
 :skip3      jsr erase_appl
             jsr draw_appl
@@ -398,6 +404,7 @@ running_mode
             bne :5
             lda applz_visible
             bne :loop1
+
             jmp next_wave_mode
 
 :5          dec send_countdown  ; check if it has been long enough to send
@@ -410,14 +417,17 @@ running_mode
 :first      ldx appl_slots      ; get slot for new appl
             cpx #255
             beq :8
+;           cpx applz_visible
+;           bne :8
             inc appl_slots      ; consume next empty slot
             bne :9              ; always
-            ;*** compress lists?
+
 :8          lda state-1,x       ; search for open existing slot
             bpl :9
             dex
             bne :8
             ;*** should have found a slot ***
+:hang       beq :hang       ;***
 
 :9          lda #$80            ; mark as active
             sta state,x
@@ -482,7 +492,11 @@ draw_dotz   ldx #1
 
             ; apply dx and dy multiple times
 
+        do double_speed
+            lda #4
+        else
             lda #8
+        fin
             sta grid_col            ;***
             ldx appl_index
 :2          jsr update_dot
@@ -558,50 +572,51 @@ update_dot  lda x_frac,x
 ; NOTE: Reflection code is optimized for fall through path
 ;   where all blocks are empty, since this is common case.
 ;
-update_appl lda x_frac,x
-            sta oldx_frac,x
-            clc
-            adc dx_frac,x
-            sta x_frac,x
-            lda x_int,x
-            sta oldx_int,x
-            adc dx_int,x
-            sta x_int,x
-            tay
-            lda grid_x_table + 1,y
-            sta grid_left
-            lda grid_x_table + 1 + ball_width - 1,y
-            sec
-            sbc grid_left
-            sta grid_right
+update_appl lda x_frac,x                                ; 4
+            sta oldx_frac,x                             ; 4
+            clc                                         ; 2
+            adc dx_frac,x                               ; 4
+            sta x_frac,x                                ; 4
+            lda x_int,x                                 ; 4
+            sta oldx_int,x                              ; 4
+            adc dx_int,x                                ; 4
+            sta x_int,x                                 ; 4
+            tay                                         ; 2
+            lda grid_x_table + 1,y                      ; 4
+            sta grid_left                               ; 3
+            lda grid_x_table + 1 + ball_width - 1,y     ; 4
+            sec                                         ; 2
+            sbc grid_left                               ; 3
+            sta grid_right                              ; 3
 
-            lda y_frac,x
-            sta oldy_frac,x
-            clc
-            adc dy_frac,x
-            sta y_frac,x
-            lda y_int,x
-            sta oldy_int,x
-            adc dy_int,x
-            sta y_int,x
+            lda y_frac,x                                ; 4
+            sta oldy_frac,x                             ; 4
+            clc                                         ; 2
+            adc dy_frac,x                               ; 4
+            sta y_frac,x                                ; 4
+            lda y_int,x                                 ; 4
+            sta oldy_int,x                              ; 4
+            adc dy_int,x                                ; 4
+            sta y_int,x                                 ; 4
 
-            cmp #192-ball_height    ; check for ball y wrapping
-            bcs :reverse_dy
+            cmp #192-ball_height                        ; 2     ; check for ball y wrapping
+            bcs :reverse_dy                             ; 2
 
 :post_reverse_d7
-            tay
-            lda grid_y_table + block_gap,y
-            sta grid_top
-            lda grid_y_table + ball_height - 1,y
-            sec
-            sbc grid_top
-            sta grid_bottom
+            tay                                         ; 2
+            lda grid_y_table + block_gap,y              ; 4
+            sta grid_top                                ; 3
+            lda grid_y_table + ball_height - 1,y        ; 4
+            sec                                         ; 2
+            sbc grid_top                                ; 3
+            sta grid_bottom                             ; 3
 
-            lda grid_right
-            bne left_right      ; crossed vertical block edge
-            lda grid_bottom
-            bne up_down_x1      ; crossed horizontal block edge
-            rts                 ; TODO: loop here instead of jsr/rts
+            lda grid_right                              ; 3
+            bne left_right                              ; 2     ; crossed vertical block edge
+            lda grid_bottom                             ; 3
+            bne up_down_x1                              ; 2     ; crossed horizontal block edge
+            rts                                         ; 6     ; TODO: loop here instead of jsr/rts
+                                                        ; = 130
 
 ; reflect ball at top of screen
 
@@ -695,8 +710,10 @@ diag_up     lda dx_int,x
             bne bounce_dy           ; case a,e
             iny
             lda block_grid,y
-            bne bounce_dx           ; case b (TODO: zero dy?)
-            rts
+            beq :nob
+            jsr reflect_y           ; case b
+            jmp bounce_dx
+:nob        rts
 :dfg        lda block_grid,y
             beq :df                 ; case d,f
             jsr reflect_y           ; case g
@@ -718,12 +735,14 @@ diag_up     lda dx_int,x
             bne bounce_dy           ; case b,e
             dey
             lda block_grid,y
-            bne bounce_dx           ; case a (TODO: zero dy?)
-            rts
+            beq :noa
+            jsr reflect_y           ; case a
+            jmp bounce_dx
+:noa        rts
 :cfg        lda block_grid+1,y
             beq next_y_bounce_dx    ; case c,f
             jsr reflect_y           ; case g
-        ;   bne next_y_bounce_dx    ; always
+        ;   bne next_y_bounce_dx
 
 next_y_bounce_dx
             tya
@@ -731,7 +750,7 @@ next_y_bounce_dx
             adc #grid_width
             tay
 bounce_dx   jsr reflect_x
-            jmp bounce_block
+            jmp hit_block
 
 next_y_bounce_dy
             tya
@@ -739,7 +758,7 @@ next_y_bounce_dy
             adc #grid_width
             tay
 bounce_dy   jsr reflect_y
-            jmp bounce_block
+            jmp hit_block
 
 diag_down   lda dx_int,x
             bmi :diag_down_left
@@ -758,8 +777,10 @@ diag_down   lda dx_int,x
             bne next_y_bounce_dy    ; case c,e
             iny
             lda block_grid+grid_width,y
-            bne next_y_bounce_dx    ; case d (TODO: zero dy?)
-            rts
+            beq :nod
+            jsr reflect_y           ; case d
+            jmp next_y_bounce_dx
+:nod        rts
 :bfg        lda block_grid+grid_width,y
             beq :bf                 ; case b,f
             jsr reflect_y           ; case g
@@ -781,8 +802,10 @@ diag_down   lda dx_int,x
             bne next_y_bounce_dy    ; case d,e
             dey
             lda block_grid+grid_width,y
-            bne next_y_bounce_dx    ; case c (TODO: zero dy?)
-            rts
+            beq :noc
+            jsr reflect_y           ; case c
+            jmp next_y_bounce_dx
+:noc        rts
 :afg        lda block_grid+grid_width+1,y
             beq bounce_dx           ; case a,f
             jsr reflect_y           ; case g
@@ -834,12 +857,12 @@ reflect_y   lda oldy_frac,x     ; back up to old y
 ;
 ; on entry:
 ;   x: ball index
+;   y: block index
 ;
 ; on exit:
 ;   x: ball index
 ;
-bounce_block
-            lda block_counts,y
+hit_block   lda block_counts,y
             beq :1              ; border blocks have zero count
             sec
             sbc #1
@@ -849,7 +872,7 @@ bounce_block
             sta block_grid,y
 
             jsr erase_block
-            ldx appl_index
+            ldx appl_index      ; restore ball index
 
 :1          rts
 
@@ -909,6 +932,7 @@ scroll_screen_grid
             sta sourceh
 
             ldy #grid_width-2*3-1
+            ;*** self-modify these instead ***
 :3          lda (sourcel),y
             sta (screenl),y
             dey
@@ -926,6 +950,7 @@ scroll_screen_grid
             sta screenh
             ldy #grid_width-2*3-1
             lda #0
+            ;*** self-modify this instead ***
 :5          sta (screenl),y
             dey
             bpl :5
@@ -933,6 +958,38 @@ scroll_screen_grid
             bpl :4
 
             dec grid_row
+            bne :1
+            rts
+
+erase_screen_grid
+            ldx #0
+:1          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+
+            ; draw bar on left of grid
+
+            ldy #grid_screen_left+2
+            lda #$18
+            sta (screenl),y
+            iny
+
+            ; clear main grid
+
+            lda #0
+:2          sta (screenl),y
+            iny
+            cpy #grid_width*3-3+grid_screen_left
+            bne :2
+
+            ; draw bar on right of grid
+
+            lda #$03
+            sta (screenl),y
+
+            inx
+            cpx #192
             bne :1
             rts
 
@@ -953,6 +1010,22 @@ update_angle
             eor #$7f
             tay
 
+        do double_speed
+            lda sine_table,x
+            asl
+            sta angle_dx_frac
+            lda #0
+            rol
+            sta angle_dx_int
+
+            lda sine_table,y
+            eor #$ff
+            asl
+            sta angle_dy_frac
+            lda #$ff
+            rol
+            sta angle_dy_int
+        else
             lda sine_table,x
             sta angle_dx_frac
             lda #0
@@ -963,11 +1036,29 @@ update_angle
             sta angle_dy_frac
             lda #$ff
             sta angle_dy_int
+        fin
             rts
 
 :left       eor #$7f
             tay
 
+        do double_speed
+            lda sine_table,y
+            eor #$ff
+            asl
+            sta angle_dx_frac
+            lda #$ff
+            rol
+            sta angle_dx_int
+
+            lda sine_table,x
+            eor #$ff
+            asl
+            sta angle_dy_frac
+            lda #$ff
+            rol
+            sta angle_dy_int
+        else
             lda sine_table,y
             eor #$ff
             sta angle_dx_frac
@@ -979,6 +1070,7 @@ update_angle
             sta angle_dy_frac
             lda #$ff
             sta angle_dy_int
+        fin
             rts
 
 ;
@@ -1004,21 +1096,6 @@ sine_table  hex 000306090c0f1215
             hex fbfbfcfcfdfdfefe
             hex feffffffffffffff
 
-;---------------------------------------
-;
-; draw all blocks in grid using block_grid
-;
-draw_blocks ldy #0
-:1          sty block_index
-            lda block_grid,y
-            beq :2              ; skip empty blocks
-            bmi :2              ; TODO: maybe get rid of?
-            jsr draw_block
-:2          ldy block_index
-            iny
-            cpy #grid_size
-            bne :1
-            rts
 ;
 ; on entry
 ;   y: grid index of block
@@ -1026,20 +1103,23 @@ draw_blocks ldy #0
 ;
 draw_block
             ; choose color based on block type
-            ldx #$d5
-            cmp #block_type2
-            bne :1
+;           ldx #$d5
+;           cmp #block_type2
+;           bne :1
             ldx #$55
 :1          stx block_color
 
             lda grid_screen_rows,y
             tax
             clc
-            adc #block_height-block_gap
+            adc #block_height-block_gap-1
             sta block_bot
             lda grid_screen_cols,y
             tay
-:2          lda hires_table_lo,x
+
+            ; first line
+
+            lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1055,8 +1135,43 @@ draw_block
             dey
             dey
             inx
+
+:2          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            lda block_color
+            and #$83            ;***
+            sta (screenl),y
+            iny
+            ;eor #$7f
+            ;sta (screenl),y
+            iny
+            lda block_color
+            and #$98            ; clip out block gap
+            sta (screenl),y
+            dey
+            dey
+            inx
             cpx block_bot
             bne :2
+
+            ; last line
+
+            lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            lda block_color
+            sta (screenl),y
+            iny
+            eor #$7f
+            sta (screenl),y
+            iny
+            eor #$7f
+            and #$9f            ; clip out block gap
+            sta (screenl),y
+
             rts
 ;
 ; on entry
@@ -1139,17 +1254,18 @@ eor_dot     ldy appl_index
 ;
 ; erase appl at old position using table data
 ;
-erase_appl  ldy appl_index
-            ldx oldx_int,y
-            lda oldy_int,y
-            jmp eor_appl
+erase_appl  ldy appl_index          ; 3
+            ldx oldx_int,y          ; 4
+            lda oldy_int,y          ; 4
+            jmp eor_appl            ; 3
 
 ;
 ; draw appl at new position using table data
 ;
-draw_appl   ldy appl_index
-            ldx x_int,y
-            lda y_int,y    ; fall through
+draw_appl   ldy appl_index          ; 3
+            ldx x_int,y             ; 4
+            lda y_int,y             ; 4
+            ; fall through
 ;
 ; eor appl to specific screen coordinates
 ;   relative to grid edge
@@ -1158,35 +1274,37 @@ draw_appl   ldy appl_index
 ;   x: screen x position
 ;   a: screen y position
 ;
-eor_appl    sta ypos
-            lda div7,x
-            clc
-            adc #grid_screen_left
-            sta xpos
-            lda #ball_height
-            sta ycount
-            ldy mod7,x
-            ldx applz_lo,y
-eor_loop    ldy ypos
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-            ldy xpos
-            lda appl0,x
-            eor (screenl),y
-            sta (screenl),y
-            inx
-            iny
-            lda appl0,x
-            beq :1
-            eor (screenl),y
-            sta (screenl),y
-:1          inx
-            inc ypos
-            dec ycount
-            bne eor_loop
-            rts
+eor_appl    sta ypos                ; 3
+            lda div7,x              ; 4
+            clc                     ; 2
+            adc #grid_screen_left   ; 2
+            sta xpos                ; 3
+            lda #ball_height        ; 2
+            sta ycount              ; 3
+            ldy mod7,x              ; 4
+            ldx applz_lo,y          ; 4
+                                    ;   = 27
+eor_loop    ldy ypos                ; 3
+            lda hires_table_lo,y    ; 4
+            sta screenl             ; 3
+            lda hires_table_hi,y    ; 4
+            sta screenh             ; 3
+            ldy xpos                ; 3
+            lda appl0,x             ; 4
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+            inx                     ; 2
+            iny                     ; 2
+            lda appl0,x             ; 4
+            beq :1                  ; 2/3
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+:1          inx                     ; 2
+            inc ypos                ; 5
+            dec ycount              ; 5
+            bne eor_loop            ; 3/2
+                                    ;   = 69 * 5 = 340
+            rts                     ; 6
 
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
@@ -1497,3 +1615,6 @@ hires_table_hi
             hex 22262a2e32363a3e
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
+
+            put text.s
+
