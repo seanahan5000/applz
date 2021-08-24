@@ -41,7 +41,7 @@ texth         = $05
 text_index    = $06
 text_length   = $07
 
-applz_ready   = $10     ; applz ready but not yet launched
+; $10
 applz_visible = $11     ; applz visible on screen (<= appl_slots)
 appl_slots    = $12     ; slots used in tables, both visible and complete
 
@@ -78,11 +78,16 @@ block_type  = $37
 block_color = $38
 block_top   = $39
 block_left  = $3a
-block_bot   = $3b
+block_mid   = $3b
+block_bot   = $3c
 
-wave_bcd0   = $40
-wave_bcd1   = $41
-wave_index  = $42
+wave_index  = $40
+wave_bcd0   = $41
+wave_bcd1   = $42
+
+applz_ready = $43       ; applz ready but not yet launched
+applz_ready_bcd0 = $44
+applz_ready_bcd1 = $45
 
 state       = $1000     ; high bit set when visible/active
 x_frac      = $1100
@@ -157,7 +162,7 @@ start
             ldy #>wave_str
             jsr draw_string
 
-            lda #72         ;*** use a constant ***
+            lda #72         ; TODO: use a constant
             sta start_x
 
             jmp first_wave_mode
@@ -303,6 +308,12 @@ aiming_mode lda #16         ;*** dot count
             lda #0
             sta appl_index
 
+            ; convert applz_ready to BCD and draw
+
+            lda appl_count
+            jsr set_applz_ready
+            jsr draw_applz_ready
+
             lda #0
             sta x_frac
             sta y_frac
@@ -357,8 +368,6 @@ running_mode
             jsr eor_appl        ; erase aiming ball
             jsr erase_dotz
 
-            lda appl_count
-            sta applz_ready
             lda #1
             sta send_countdown
             lda #0
@@ -453,15 +462,75 @@ running_mode
             lda angle_dy_int
             sta dy_int,x
 
+            stx appl_index
+
+            ; decrement applz_ready count and update text
+
             dec applz_ready
+            sed
+            lda applz_ready_bcd0
+            sec
+            sbc #1
+            sta applz_ready_bcd0
+            lda applz_ready_bcd1
+            sbc #0
+            sta applz_ready_bcd1
+            cld
+            jsr draw_applz_ready
+
             inc applz_visible
 
-            stx appl_index
             jsr draw_appl       ;*** not needed on first pass ***
 
             lda #send_delay     ; reset send delay countdown
             sta send_countdown
             jmp :loop1
+
+; set and convert applz_ready to BCD
+;
+; on entry:
+;   a: applz_ready value
+
+set_applz_ready
+            sta applz_ready
+            tax
+            ldy #0
+:0          txa
+            sec
+            sbc #100
+            bcc :1
+            tax
+            iny
+            bne :0              ; always
+:1          sty applz_ready_bcd1
+
+            ldy #0
+:2          txa
+            sec
+            sbc #10
+            bcc :3
+            tax
+            iny
+            bne :2              ; always
+
+:3          stx applz_ready_bcd0
+            tya
+            asl
+            asl
+            asl
+            asl
+            ora applz_ready_bcd0
+            sta applz_ready_bcd0
+            rts
+
+draw_applz_ready
+            ldx #wave_x+5
+            ldy #wave_y+8
+            jsr set_text_xy
+            lda applz_ready_bcd1
+            jsr draw_number
+            lda applz_ready_bcd0
+            jmp draw_number
 
 ;---------------------------------------
 
@@ -867,15 +936,18 @@ hit_block   lda block_counts,y
             sec
             sbc #1
             sta block_counts,y
-            bne :1
+            bne :2
+
             lda #0
             sta block_grid,y
-
             jsr erase_block
             ldx appl_index      ; restore ball index
-
 :1          rts
 
+:2          lda block_grid,y
+            jsr draw_block
+            ldx appl_index      ; restore ball index
+            rts
 
 ; divide by 21 table to convert x position into grid column
 ; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
@@ -1101,6 +1173,8 @@ sine_table  hex 000306090c0f1215
 ;   y: grid index of block
 ;   a: block type
 ;
+; TODO: don't draw if block level doesn't change
+;
 draw_block
             ; choose color based on block type
 ;           ldx #$d5
@@ -1114,6 +1188,17 @@ draw_block
             clc
             adc #block_height-block_gap-1
             sta block_bot
+
+            lda #block_height-block_gap
+            sec
+            sbc block_counts,y
+            beq :10
+            bcs :11
+:10         lda #1
+:11         clc
+            adc grid_screen_rows,y
+            sta block_mid
+
             lda grid_screen_cols,y
             tay
 
@@ -1129,32 +1214,63 @@ draw_block
             eor #$7f
             sta (screenl),y
             iny
-            eor #$7f
-            and #$9f            ; clip out block gap
+            lda (screenl),y
+            eor block_color
+            and #$60            ; clip out block gap
+            eor block_color
             sta (screenl),y
             dey
             dey
-            inx
+            bpl :3              ; always
+
+            ; draw empty box lines
 
 :2          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
             lda block_color
-            and #$83            ;***
+            and #$83
             sta (screenl),y
             iny
-            ;eor #$7f
-            ;sta (screenl),y
+            and #$80
+            sta (screenl),y
             iny
+            lda (screenl),y
+            eor block_color
+            and #$60
+            eor block_color
+            and #$f8            ; clip out block gap
+            sta (screenl),y
+            dey
+            dey
+:3          inx
+            cpx block_mid
+            bne :2
+            beq :5              ; always
+
+            ; draw full box lines
+
+:4          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
             lda block_color
-            and #$98            ; clip out block gap
+            sta (screenl),y
+            iny
+            eor #$7f
+            sta (screenl),y
+            iny
+            lda (screenl),y
+            eor block_color
+            and #$60            ; clip out block gap
+            eor block_color
             sta (screenl),y
             dey
             dey
             inx
-            cpx block_bot
-            bne :2
+:5          cpx block_bot
+            bne :4
 
             ; last line
 
@@ -1168,11 +1284,30 @@ draw_block
             eor #$7f
             sta (screenl),y
             iny
-            eor #$7f
-            and #$9f            ; clip out block gap
+            lda (screenl),y
+            eor block_color
+            and #$60            ; clip out block gap
+            eor block_color
             sta (screenl),y
 
             rts
+
+
+            ; block pattern, reversed
+            ; TODO: use this?
+
+            db  %01010101, %00101010, %00010101     ; filled line (8/8)
+            db  %01010001, %00101010, %00010101     ;             (7/8)
+            db  %01000001, %00101010, %00010101     ;             (6/8)
+            db  %00000001, %00101010, %00010101     ;             (5/8)
+
+            db  %00000001, %00101000, %00010101     ;             (4/8)
+            db  %00000001, %00100000, %00010101     ;             (3/8)
+            db  %00000001, %00000000, %00010101     ;             (2/8)
+
+            db  %00000001, %00000000, %00010100     ;             (1/8)
+            db  %00000001, %00000000, %00010000     ; empty line  (0/8)
+
 ;
 ; on entry
 ;   y: grid index of block
