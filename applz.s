@@ -368,7 +368,7 @@ running_mode
             jsr eor_appl        ; erase aiming ball
             jsr erase_dotz
 
-            lda #1
+            lda #send_delay
             sta send_countdown
             lda #0
             sta applz_visible
@@ -407,22 +407,42 @@ running_mode
             cpx appl_slots
             bne :loop2
 
-            ; check for more applz to send
-
-            lda applz_ready     ; check for applz left to send
-            bne :5
-            lda applz_visible
+            dec send_countdown  ; check if it has been long enough to send
             bne :loop1
 
-            jmp next_wave_mode
+            lda #send_delay     ; reset send delay countdown
+            sta send_countdown
 
-:5          dec send_countdown  ; check if it has been long enough to send
+            lda applz_ready     ; any applz left to send?
+            bne :skip5
+            lda applz_visible   ; any still visible?
             bne :loop1
+            jmp next_wave_mode  ; no, start next wave
 
-            lda applz_visible   ; no more than 255 applz simultaneously
+:skip5      lda applz_visible   ; no more than 255 applz simultaneously
             cmp #255
             beq :loop1
 
+        do 0 ;new_slot_logic
+
+            cmp appl_slots      ; if applz_visible == appl_slots
+            bne :skip6
+:first      ldx appl_slots
+            inc appl_slots      ; consume next empty slot
+            bne :skip7          ; always
+
+:skip6      ldx #0
+:loop3      lda state,x         ; walk slots looking for empty
+            bpl :skip7
+            inx
+            cpx appl_slots
+            bne :loop3
+
+            ;*** should have found a slot ***
+:hang       beq :hang       ;***
+
+:skip7
+        else
 :first      ldx appl_slots      ; get slot for new appl
             cpx #255
             beq :8
@@ -438,7 +458,10 @@ running_mode
             ;*** should have found a slot ***
 :hang       beq :hang       ;***
 
-:9          lda #$80            ; mark as active
+:9
+        fin
+
+            lda #$80            ; mark as active
             sta state,x
 
             lda start_x         ; set start position
@@ -481,9 +504,6 @@ running_mode
             inc applz_visible
 
             jsr draw_appl       ;*** not needed on first pass ***
-
-            lda #send_delay     ; reset send delay countdown
-            sta send_countdown
             jmp :loop1
 
 ; set and convert applz_ready to BCD
@@ -1440,6 +1460,7 @@ eor_loop    ldy ypos                ; 3
             bne eor_loop            ; 3/2
                                     ;   = 69 * 5 = 340
             rts                     ; 6
+                                    ;   = 373
 
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
