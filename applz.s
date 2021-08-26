@@ -124,7 +124,6 @@ PREAD       = $FB1E
 ; PERF:
 ;   - eor delta ball drawing
 ;   - zpage old ball position instead of table
-;   - double dx/dy values
 ;   - throttle ball redraw rate
 
             org $6000
@@ -266,6 +265,7 @@ first_wave_mode
             sta block_index
 
             ; create new blocks on top row, allowing at most one block double-up
+            ;*** don't double up past 255 ***
 
 :2          jsr random
             tax
@@ -343,7 +343,7 @@ aiming_mode lda #16         ;*** dot count
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
-            bcs :3              ; TODO: clamp a little more?
+            bcs :3              ;*** TODO: clamp a little more?
             ldy #2
 :3          cpy #253
             bcc :4
@@ -401,8 +401,8 @@ running_mode
 
 :skip3      jsr erase_appl
             jsr draw_appl
-:skip4
-            ldx appl_index
+
+:skip4      ldx appl_index
             inx
             cpx appl_slots
             bne :loop2
@@ -709,7 +709,7 @@ update_appl lda x_frac,x                                ; 4
 
 ; reflect ball at top of screen
 
-:reverse_dy cmp #192+ball_height+1
+:reverse_dy cmp #192+ball_height+1      ;*** sometimes wrong? *** (straight up/down) ***
             bcc :ball_done
             jsr reflect_y
             jmp :post_reverse_d7
@@ -721,12 +721,19 @@ update_appl lda x_frac,x                                ; 4
             lda #0
             sta state,x
             dec applz_visible
-            bne :1
+            bne :3
             lda applz_ready
-            bne :1
+            bne :3
+
             lda x_int,x         ; use final x for start/aim x
-            sta start_x
-:1          rts
+            cmp #block_width    ;   clamped to reasonable values
+            bcs :1
+            lda #block_width
+:1          cmp #162
+            bcc :2
+            lda #162            ; grid_screen_width - 21 - ball_width - 1
+:2          sta start_x
+:3          rts
 
 left_right  lda grid_bottom
             bne left_right_y2   ; crossing two blocks vertically
@@ -746,8 +753,12 @@ left_right_y1
             bmi :left
             iny                 ; look at right edge
 :left       lda block_grid,y
-            bne bounce_dx
+            bne :bounce_dx
             rts
+
+:bounce_dx  jsr reflect_x
+            jmp hit_block
+
 ;
 ; ball moving horizontally crossed vertical edge on two blocks
 ;
@@ -775,15 +786,23 @@ up_down_x1  lda grid_left
             bpl :down
 
 :up         lda block_grid,y
-            bne bounce_dy
+            bne :bounce_dy
             rts
 
 :down       lda block_grid+grid_width,y
-            bne next_y_bounce_dy
+            bne :next_y_bounce_dy
             rts
 
+:next_y_bounce_dy
+            tya
+            clc
+            adc #grid_width
+            tay
+:bounce_dy  jsr reflect_y
+            jmp hit_block
+
 diag_up     lda dx_int,x
-            bmi :diag_up_left
+            bmi diag_up_left
 ;
 ;   a      b      c      d      e      f      g
 ; +-+      +-+                +-+-+    +-+  +-+..
@@ -792,22 +811,61 @@ diag_up     lda dx_int,x
 ;  O      O             O| |   O      O| |   O| |
 ;                        +-+           +-+    +-+
 ;
-:diag_up_right
+diag_up_right
             lda block_grid+grid_width+1,y
             bne :dfg
             lda block_grid,y
-            bne bounce_dy           ; case a,e
+            bne :ae
+            lda block_grid+1,y
+            bne :b
+            rts
+
+:ae         lda block_grid+1,y
+            bne :e
+
+:a          jsr reflect_y
+            jmp hit_block
+
+:e          jsr reflect_y
+            jsr hit_block
             iny
-            lda block_grid,y
-            beq :nob
-            jsr reflect_y           ; case b
-            jmp bounce_dx
-:nob        rts
+            jmp hit_block
+
+:b          iny
+            jsr reflect_y
+            jsr reflect_x
+            jmp hit_block
+
 :dfg        lda block_grid,y
-            beq :df                 ; case d,f
-            jsr reflect_y           ; case g
-:df         iny
-            bne next_y_bounce_dx    ; always
+            bne :g
+            lda block_grid+1,y
+            bne :f
+
+:d          jsr reflect_x
+            tya
+            clc
+            adc #grid_width+1
+            tay
+            jmp hit_block
+
+:f          iny
+            jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
+:g          jsr reflect_y
+            jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width+1
+            tay
+            jmp hit_block
+
 ;
 ;   a      b       c     d      e      f      g
 ; +-+      +-+                +-+-+  +-+    ..+-+
@@ -816,41 +874,63 @@ diag_up     lda dx_int,x
 ;    O      O    | |O            O   | |O   | |O
 ;                +-+                 +-+    +-+
 ;
-:diag_up_left
+diag_up_left
             lda block_grid+grid_width,y
             bne :cfg
-            iny
+            lda block_grid+1,y
+            bne :be
             lda block_grid,y
-            bne bounce_dy           ; case b,e
-            dey
-            lda block_grid,y
-            beq :noa
-            jsr reflect_y           ; case a
-            jmp bounce_dx
-:noa        rts
-:cfg        lda block_grid+1,y
-            beq next_y_bounce_dx    ; case c,f
-            jsr reflect_y           ; case g
-        ;   bne next_y_bounce_dx
+            bne :a_             ; TODO: why doesn't assembler like :a?
+            rts
 
-next_y_bounce_dx
-            tya
-            clc
-            adc #grid_width
-            tay
-bounce_dx   jsr reflect_x
+:be         lda block_grid,y
+            bne :e
+
+:b          iny
+            jsr reflect_y
             jmp hit_block
 
-next_y_bounce_dy
+:e          jsr reflect_y
+            jsr hit_block
+            iny
+            jmp hit_block
+
+:a_         jsr reflect_y
+            jsr reflect_x
+            jmp hit_block
+
+:cfg        lda block_grid+1,y
+            bne :g
+:cf         lda block_grid,y
+            bne :f
+
+:c          jsr reflect_x
             tya
             clc
             adc #grid_width
             tay
-bounce_dy   jsr reflect_y
+            jmp hit_block
+
+:f          jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
+:g          jsr reflect_y
+            jsr reflect_x
+            iny
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width-1
+            tay
             jmp hit_block
 
 diag_down   lda dx_int,x
-            bmi :diag_down_left
+            bmi diag_down_left
 ;
 ;   a      b       c     d      e      f      g
 ;          +-+                         +-+    +-+
@@ -859,22 +939,70 @@ diag_down   lda dx_int,x
 ;                | |     | |  | | |    | |  | | .
 ;                +-+     +-+  +-+-+    +-+  +-+..
 ;
-:diag_down_right
+diag_down_right
             lda block_grid+1,y
             bne :bfg
             lda block_grid+grid_width,y
-            bne next_y_bounce_dy    ; case c,e
+            bne :ce
+            lda block_grid+grid_width+1,y
+            bne :d
+            rts
+
+:ce         lda block_grid+grid_width+1,y
+            bne :e
+
+:c          jsr reflect_y
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
+:e          jsr reflect_y
+            tya
+            clc
+            adc #grid_width
+            tay
+            jsr hit_block
             iny
-            lda block_grid+grid_width,y
-            beq :nod
-            jsr reflect_y           ; case d
-            jmp next_y_bounce_dx
-:nod        rts
+            jmp hit_block
+
+:d          jsr reflect_y
+            jsr reflect_x
+            tya
+            clc
+            adc #grid_width+1
+            tay
+            jmp hit_block
+
 :bfg        lda block_grid+grid_width,y
-            beq :bf                 ; case b,f
-            jsr reflect_y           ; case g
-:bf         iny
-            bne bounce_dx           ; always
+            bne :g
+:bf         lda block_grid+grid_width+1,y
+            bne :f
+
+:b          iny
+            jsr reflect_x
+            jmp hit_block
+
+:f          iny
+            jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
+:g          jsr reflect_y
+            jsr reflect_x
+            iny
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width-1
+            tay
+            jmp hit_block
+
 ;
 ;   a      b       c     d      e      f      g
 ; +-+                                +-+    +-+
@@ -883,22 +1011,66 @@ diag_down   lda dx_int,x
 ;                | |     | |  | | |  | |    . | |
 ;                +-+     +-+  +-+-+  +-+    ..+-+
 ;
-:diag_down_left
+diag_down_left
             lda block_grid,y
             bne :afg
+            lda block_grid+grid_width+1,y
+            bne :de
+            lda block_grid+grid_width,y
+            bne :c
+            rts
+
+:de         lda block_grid+grid_width,y
+            bne :e
+
+:d          jsr reflect_y
+            tya
+            clc
+            adc #grid_width+1
+            tay
+            jmp hit_block
+
+:e          jsr reflect_y
+            tya
+            clc
+            adc #grid_width
+            tay
+            jsr hit_block
             iny
-            lda block_grid+grid_width,y
-            bne next_y_bounce_dy    ; case d,e
-            dey
-            lda block_grid+grid_width,y
-            beq :noc
-            jsr reflect_y           ; case c
-            jmp next_y_bounce_dx
-:noc        rts
+            jmp hit_block
+
+:c          jsr reflect_y
+            jsr reflect_x
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
 :afg        lda block_grid+grid_width+1,y
-            beq bounce_dx           ; case a,f
-            jsr reflect_y           ; case g
-            jmp bounce_dx
+            bne :g
+:af         lda block_grid+grid_width,y
+            bne :f
+
+:a          jsr reflect_x
+            jmp hit_block
+
+:f          jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width
+            tay
+            jmp hit_block
+
+:g          jsr reflect_y
+            jsr reflect_x
+            jsr hit_block
+            tya
+            clc
+            adc #grid_width+1
+            tay
+            jmp hit_block
 
 ;
 ; reflect x/y,dx/dy without altering block counts
@@ -911,6 +1083,7 @@ diag_down   lda dx_int,x
 ;   x: ball index
 ;   y: block index
 ;
+
 reflect_x   lda oldx_frac,x     ; back up to old x
             sta x_frac,x
             lda oldx_int,x
@@ -950,6 +1123,7 @@ reflect_y   lda oldy_frac,x     ; back up to old y
 ;
 ; on exit:
 ;   x: ball index
+;   y: block index
 ;
 hit_block   lda block_counts,y
             beq :1              ; border blocks have zero count
@@ -960,13 +1134,17 @@ hit_block   lda block_counts,y
 
             lda #0
             sta block_grid,y
+            sty block_index
             jsr erase_block
             ldx appl_index      ; restore ball index
+            ldy block_index     ; restore block index
 :1          rts
 
 :2          lda block_grid,y
+            sty block_index
             jsr draw_block
             ldx appl_index      ; restore ball index
+            ldy block_index     ; restore block index
             rts
 
 ; divide by 21 table to convert x position into grid column
@@ -1438,7 +1616,7 @@ eor_appl    sta ypos                ; 3
             sta ycount              ; 3
             ldy mod7,x              ; 4
             ldx applz_lo,y          ; 4
-                                    ;   = 27
+                                    ; = 27
 eor_loop    ldy ypos                ; 3
             lda hires_table_lo,y    ; 4
             sta screenl             ; 3
@@ -1458,9 +1636,9 @@ eor_loop    ldy ypos                ; 3
             inc ypos                ; 5
             dec ycount              ; 5
             bne eor_loop            ; 3/2
-                                    ;   = 69 * 5 = 340
+                                    ; = 69 * 5 = 340
             rts                     ; 6
-                                    ;   = 373
+                                    ; = 373
 
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
