@@ -79,19 +79,20 @@ seed0       = $24
 seed1       = $25
 
 grid_left   = $30
-grid_right  = $31
+grid_dx     = $31
 grid_top    = $32
-grid_bottom = $33
+grid_col    = $33
+grid_row    = $34
 
-grid_col    = $34
-grid_row    = $35
-block_index = $36
-block_type  = $37
-block_color = $38
-block_top   = $39
-block_left  = $3a
-block_mid   = $3b
-block_bot   = $3c
+block_index = $35
+block_type  = $36
+block_color = $37
+block_top   = $38
+block_left  = $39
+block_mid   = $3a
+block_bot   = $3b
+
+grid_bottom = $3c   ;*** get rid of
 
 wave_index  = $40
 wave_bcd0   = $41
@@ -101,19 +102,21 @@ applz_ready = $43       ; applz ready but not yet launched
 applz_ready_bcd0 = $44
 applz_ready_bcd1 = $45
 
+; TODO: move these
+ball_x      = $48
+ball_dx     = $49
+ball_y      = $4a
+ball_dy     = $4b
+
 state       = $1000     ; high bit set when visible/active
 x_frac      = $1100
 x_int       = $1200
-oldx_frac   = $1300
-oldx_int    = $1400
-dx_frac     = $1500
-dx_int      = $1600
-y_frac      = $1700
-y_int       = $1800
-oldy_frac   = $1900
-oldy_int    = $1a00
-dy_frac     = $1b00
-dy_int      = $1c00
+dx_frac     = $1300
+dx_int      = $1400
+y_frac      = $1500
+y_int       = $1600
+dy_frac     = $1700
+dy_int      = $1800
 
 ; TODO: use correct abbreviations
 keyboard    = $C000
@@ -134,8 +137,6 @@ PREAD       = $FB1E
 ;   - remove aiming richochet
 ;
 ; PERF:
-;   - eor delta ball drawing
-;   - zpage old ball position instead of table
 ;   - throttle ball redraw rate
 
             org $6000
@@ -403,23 +404,6 @@ running_mode subroutine
 
             jsr update_appl
 
-            lda state,x         ; newly complete?
-            bpl .skip4
-
-        if double_speed
-        else
-            lda x_int,x         ; check for change in x position
-            cmp oldx_int,x
-            bne .skip3
-
-            lda y_int,x         ; check for change in y position
-            cmp oldy_int,x
-            beq .skip4
-        endif
-
-.skip3      jsr erase_appl
-            jsr draw_appl
-
 .skip4      ldx appl_index
             inx
             cpx appl_slots
@@ -484,15 +468,11 @@ running_mode subroutine
 
             lda start_x         ; set start position
             sta x_int,x
-            sta oldx_int,x
             lda #start_y
             sta y_int,x
-            sta oldy_int,x
             lda #0
             sta x_frac,x
             sta y_frac,x
-            sta oldx_frac,x
-            sta oldy_frac,x
 
             lda angle_dx_frac   ; set deltas based on angle
             sta dx_frac,x
@@ -521,7 +501,11 @@ running_mode subroutine
 
             inc applz_visible
 
-            jsr draw_appl       ;*** not needed on first pass ***
+            ; TODO: change interface to clean this up
+            ldy appl_index
+            ldx x_int,y
+            lda y_int,y
+            jsr eor_appl       ;*** not needed on first pass ***
             jmp .loop1
 
 ; set and convert applz_ready to BCD
@@ -534,25 +518,25 @@ set_applz_ready subroutine
             sta applz_ready
             tax
             ldy #0
-.0          txa
+.1          txa
             sec
             sbc #100
-            bcc .1
+            bcc .2
             tax
             iny
-            bne .0              ; always
-.1          sty applz_ready_bcd1
+            bne .1              ; always
+.2          sty applz_ready_bcd1
 
             ldy #0
-.2          txa
+.3          txa
             sec
             sbc #10
-            bcc .3
+            bcc .4
             tax
             iny
-            bne .2              ; always
+            bne .3              ; always
 
-.3          stx applz_ready_bcd0
+.4          stx applz_ready_bcd0
             tya
             asl
             asl
@@ -646,12 +630,10 @@ erase_dotz  subroutine
 update_dot  subroutine
 
             lda x_frac,x
-            sta oldx_frac,x
             clc
             adc dx_frac,x
             sta x_frac,x
             lda x_int,x
-            sta oldx_int,x
             adc dx_int,x
             sta x_int,x
 
@@ -663,12 +645,10 @@ update_dot  subroutine
 .1          jsr reflect_x
 .2
             lda y_frac,x
-            sta oldy_frac,x
             clc
             adc dy_frac,x
             sta y_frac,x
             lda y_int,x
-            sta oldy_int,x
             adc dy_int,x
             sta y_int,x
             rts
@@ -689,29 +669,28 @@ update_dot  subroutine
 update_appl subroutine
 
             lda x_frac,x                                ; 4
-            sta oldx_frac,x                             ; 4
             clc                                         ; 2
             adc dx_frac,x                               ; 4
             sta x_frac,x                                ; 4
             lda x_int,x                                 ; 4
-            sta oldx_int,x                              ; 4
+            sta ball_x                                  ; 3
             adc dx_int,x                                ; 4
             sta x_int,x                                 ; 4
+            sta ball_dx                                 ; 3
             tay                                         ; 2
+
             lda grid_x_table + 1,y                      ; 4
             sta grid_left                               ; 3
-            lda grid_x_table + 1 + ball_width - 1,y     ; 4
             sec                                         ; 2
-            sbc grid_left                               ; 3
-            sta grid_right                              ; 3
+            sbc grid_x_table + 1 + ball_width - 1,y     ; 4
+            sta grid_dx                                 ; 3
 
             lda y_frac,x                                ; 4
-            sta oldy_frac,x                             ; 4
             clc                                         ; 2
             adc dy_frac,x                               ; 4
             sta y_frac,x                                ; 4
             lda y_int,x                                 ; 4
-            sta oldy_int,x                              ; 4
+            sta ball_y                                  ; 3
             adc dy_int,x                                ; 4
             sta y_int,x                                 ; 4
 
@@ -719,7 +698,18 @@ update_appl subroutine
             bcs .reverse_dy                             ; 2
 
 .post_reverse_d7
+            sta ball_dy                                 ; 3
             tay                                         ; 2
+
+;           lda grid_y_table + block_gap,y              ; 4
+;           sta grid_top                                ; 3
+;           cmp grid_y_table + ball_height - 1,y        ; 4
+;           bne up_down                                 ; 2     ; crossed horizontal block edge
+;           lda grid_dx                                 ; 3
+;           bne left_right_xx                           ; 2     ; crossed vertical block edge
+;           jmp move_appl                               ; 4
+;                                                       ; = 110
+
             lda grid_y_table + block_gap,y              ; 4
             sta grid_top                                ; 3
             lda grid_y_table + ball_height - 1,y        ; 4
@@ -727,12 +717,11 @@ update_appl subroutine
             sbc grid_top                                ; 3
             sta grid_bottom                             ; 3
 
-            lda grid_right                              ; 3
+            lda grid_dx   ;grid_right                   ; 3
             bne left_right                              ; 2     ; crossed vertical block edge
             lda grid_bottom                             ; 3
             bne up_down_x1                              ; 2     ; crossed horizontal block edge
-            rts                                         ; 6     ; TODO: loop here instead of jsr/rts
-                                                        ; = 130
+            jmp move_appl                               ; 4
 
 ; reflect ball at top of screen
 
@@ -744,6 +733,10 @@ update_appl subroutine
 ; remove ball off bottom of screen
 
 ball_done   subroutine
+
+            ldx ball_x
+            lda ball_y
+            jsr eor_appl
 
             ldx appl_index
             lda #0
@@ -765,6 +758,7 @@ ball_done   subroutine
 
 left_right  lda grid_bottom
             bne left_right_y2   ; crossing two blocks vertically
+
 ;
 ; ball moving horizontally crossed vertical edge on single block
 ;
@@ -782,10 +776,10 @@ left_right_y1
             iny                 ; look at right edge
 .left       lda block_grid,y
             bne .bounce_dx
-            rts
+            jmp move_appl
 
 .bounce_dx  jsr reflect_x
-            jmp hit_block
+            jmp hit_block_move_appl
 
 ;
 ; ball moving horizontally crossed vertical edge on two blocks
@@ -815,11 +809,11 @@ up_down_x1  lda grid_left
 
 .up         lda block_grid,y
             bne .bounce_dy
-            rts
+            jmp move_appl
 
 .down       lda block_grid+grid_width,y
             bne .next_y_bounce_dy
-            rts
+            jmp move_appl
 
 .next_y_bounce_dy
             tya
@@ -827,7 +821,7 @@ up_down_x1  lda grid_left
             adc #grid_width
             tay
 .bounce_dy  jsr reflect_y
-            jmp hit_block
+            jmp hit_block_move_appl
 
 diag_up     lda dx_int,x
             bmi diag_up_left
@@ -847,23 +841,23 @@ diag_up_right subroutine
             bne .ae
             lda block_grid+1,y
             bne .b
-            rts
+            jmp move_appl
 
 .ae         lda block_grid+1,y
             bne .e
 
 .a          jsr reflect_y
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .e          jsr reflect_y
             jsr hit_block
             iny
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .b          iny
             jsr reflect_y
             jsr reflect_x
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .dfg        lda block_grid,y
             bne .g
@@ -875,7 +869,7 @@ diag_up_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .f          iny
             jsr reflect_x
@@ -884,7 +878,7 @@ diag_up_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -893,7 +887,7 @@ diag_up_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 ;
 ;   a      b       c     d      e      f      g
@@ -911,23 +905,23 @@ diag_up_left subroutine
             bne .be
             lda block_grid,y
             bne .a
-            rts
+            jmp move_appl
 
 .be         lda block_grid,y
             bne .e
 
 .b          iny
             jsr reflect_y
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .e          jsr reflect_y
             jsr hit_block
             iny
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .a          jsr reflect_y
             jsr reflect_x
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .cfg        lda block_grid+1,y
             bne .g
@@ -939,7 +933,7 @@ diag_up_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .f          jsr reflect_x
             jsr hit_block
@@ -947,7 +941,7 @@ diag_up_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -957,7 +951,7 @@ diag_up_left subroutine
             clc
             adc #grid_width-1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 diag_down   lda dx_int,x
             bmi diag_down_left
@@ -977,7 +971,7 @@ diag_down_right subroutine
             bne .ce
             lda block_grid+grid_width+1,y
             bne .d
-            rts
+            jmp move_appl
 
 .ce         lda block_grid+grid_width+1,y
             bne .e
@@ -987,7 +981,7 @@ diag_down_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .e          jsr reflect_y
             tya
@@ -996,7 +990,7 @@ diag_down_right subroutine
             tay
             jsr hit_block
             iny
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .d          jsr reflect_y
             jsr reflect_x
@@ -1004,7 +998,7 @@ diag_down_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .bfg        lda block_grid+grid_width,y
             bne .g
@@ -1013,7 +1007,7 @@ diag_down_right subroutine
 
 .b          iny
             jsr reflect_x
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .f          iny
             jsr reflect_x
@@ -1022,7 +1016,7 @@ diag_down_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -1032,7 +1026,7 @@ diag_down_right subroutine
             clc
             adc #grid_width-1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 ;
 ;   a      b       c     d      e      f      g
@@ -1050,7 +1044,7 @@ diag_down_left subroutine
             bne .de
             lda block_grid+grid_width,y
             bne .c
-            rts
+            jmp move_appl
 
 .de         lda block_grid+grid_width,y
             bne .e
@@ -1060,7 +1054,7 @@ diag_down_left subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .e          jsr reflect_y
             tya
@@ -1069,7 +1063,7 @@ diag_down_left subroutine
             tay
             jsr hit_block
             iny
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .c          jsr reflect_y
             jsr reflect_x
@@ -1077,7 +1071,7 @@ diag_down_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .afg        lda block_grid+grid_width+1,y
             bne .g
@@ -1085,7 +1079,7 @@ diag_down_left subroutine
             bne .f
 
 .a          jsr reflect_x
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .f          jsr reflect_x
             jsr hit_block
@@ -1093,7 +1087,7 @@ diag_down_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -1102,7 +1096,7 @@ diag_down_left subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block
+            jmp hit_block_move_appl
 
 ;
 ; reflect x/y,dx/dy without altering block counts
@@ -1116,10 +1110,16 @@ diag_down_left subroutine
 ;   y: block index
 ;
 
-reflect_x   lda oldx_frac,x     ; back up to old x
+reflect_x   lda x_frac,x        ; back up to old x
+            sec
+            sbc dx_frac,x
             sta x_frac,x
-            lda oldx_int,x
+            lda x_int,x
+            sbc dx_int,x
             sta x_int,x
+            sta ball_x
+            sta ball_dx
+
             lda dx_frac,x       ; negate dx
             eor #$ff
             clc
@@ -1131,10 +1131,16 @@ reflect_x   lda oldx_frac,x     ; back up to old x
             sta dx_int,x
             rts
 
-reflect_y   lda oldy_frac,x     ; back up to old y
+reflect_y   lda y_frac,x        ; back up to old y
+            sec
+            sbc dy_frac,x
             sta y_frac,x
-            lda oldy_int,x
+            lda y_int,x
+            sbc dy_int,x
             sta y_int,x
+            sta ball_y
+            sta ball_dy
+
             lda dy_frac,x       ; negate dy
             eor #$ff
             clc
@@ -1144,6 +1150,9 @@ reflect_y   lda oldy_frac,x     ; back up to old y
             eor #$ff
             adc #0
             sta dy_int,x
+
+            ;*** caller assumes ball_dy in A
+            lda ball_dy
             rts
 
 ;
@@ -1306,7 +1315,8 @@ erase_screen_grid subroutine
 ;
 ; NOTE: shortcut (ones-complement) negation being used
 ;
-update_angle
+update_angle subroutine
+
             lda angle
             tax
             bpl .left
@@ -1427,10 +1437,10 @@ draw_block  subroutine
             lda #block_height-block_gap
             sec
             sbc block_counts,y
-            beq .10
-            bcs .11
-.10         lda #1
-.11         clc
+            beq .2
+            bcs .3
+.2          lda #1
+.3          clc
             adc grid_screen_rows,y
             sta block_mid
 
@@ -1456,11 +1466,11 @@ draw_block  subroutine
             sta (screenl),y
             dey
             dey
-            bpl .3              ; always
+            bpl .5              ; always
 
             ; draw empty box lines
 
-.2          lda hires_table_lo,x
+.4          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1479,14 +1489,14 @@ draw_block  subroutine
             sta (screenl),y
             dey
             dey
-.3          inx
+.5          inx
             cpx block_mid
-            bne .2
-            beq .5              ; always
+            bne .4
+            beq .7              ; always
 
             ; draw full box lines
 
-.4          lda hires_table_lo,x
+.6          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1504,8 +1514,8 @@ draw_block  subroutine
             dey
             dey
             inx
-.5          cpx block_bot
-            bne .4
+.7          cpx block_bot
+            bne .6
 
             ; last line
 
@@ -1622,63 +1632,184 @@ eor_dot     subroutine
             sta ycount
             ldy mod7,x
             ldx dotz_lo,y
-            jmp eor_loop
+.1          ldy ypos
+            lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+            ldy xpos
+            lda dot0,x
+            eor (screenl),y
+            sta (screenl),y
+            inx
+            iny
+            lda dot0,x
+            beq .2
+            eor (screenl),y
+            sta (screenl),y
+.2          inx
+            inc ypos
+            dec ycount
+            bne .1
+            rts
 
-;
-; erase appl at old position using table data
-;
-erase_appl  ldy appl_index          ; 3
-            ldx oldx_int,y          ; 4
-            lda oldy_int,y          ; 4
-            jmp eor_appl            ; 3
+eor_appl    stx ball_x
+            stx ball_dx
+            sta ball_y
+            sta ball_dy
+            ldy #0
+            ldx #0
+            clc
+            bcc common_appl         ; always
 
-;
-; draw appl at new position using table data
-;
-draw_appl   ldy appl_index          ; 3
-            ldx x_int,y             ; 4
-            lda y_int,y             ; 4
-            ; fall through
-;
-; eor appl to specific screen coordinates
-;   relative to grid edge
-;
-; on entry
-;   x: screen x position
-;   a: screen y position
-;
-eor_appl    sta ypos                ; 3
-            lda div7,x              ; 4
-            clc                     ; 2
-            adc #grid_screen_left   ; 2
-            sta xpos                ; 3
-            lda #ball_height        ; 2
+; dx * 8 + dy * 2 + ur/dl
+
+hit_block_move_appl
+            jsr hit_block
+
+move_appl   subroutine
+
+            lda ball_dy             ; 3
+            sec                     ; 2
+            sbc ball_y              ; 3
+            bcs .down               ; 2/3
+
+.up         eor #$ff                ; 3
+            tax                     ; 2
+            lda ball_dy             ; 3
+            sta ball_y              ; 3
+            inx                     ; 2
+            stx ball_dy             ; 3
+
+            lda ball_dx             ; 3
+            sec                     ; 2
+            sbc ball_x              ; 3
+            bcs .up_right           ; 2/3
+
+.up_left    eor #$ff                ; 3
+            tax                     ; 2
+            lda ball_dx             ; 3
+            sta ball_x              ; 3
+            inx                     ; 2
+            txa                     ; 2
+
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            asl                     ; 2
+            bcc xxx                 ; 3 always
+                                    ; = 63
+
+.up_right   asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            asl                     ; 2
+        ;   clc
+            adc #1                  ; 3
+            bcc xxx                 ; 3 always
+                                    ; = 52
+
+.down       sta ball_dy             ; 3
+
+            lda ball_dx             ; 3
+            sec                     ; 2
+            sbc ball_x              ; 3
+            bcs .down_right         ; 2/3
+
+.down_left  eor #$ff                ; 3
+            tax                     ; 2
+            lda ball_dx             ; 3
+            sta ball_x              ; 3
+            inx                     ; 2
+            txa                     ; 2
+
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            asl                     ; 2
+        ;   clc
+            adc #1                  ; 3
+            bcc xxx                 ; 3 always
+                                    ; = 54
+
+.down_right asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            asl                     ; 2
+        ;   bcc xxx                 ; 3 always
+                                    ; = 34
+
+xxx         tay                     ; 2
+            asl                     ; 2
+            asl                     ; 2
+            asl                     ; 2
+            tax                     ; 2
+
+            beq common_exit         ; 2/3
+
+common_appl
+            lda ball_y              ; 3
+        ;   clc                     ; 2
+            adc appl_heights,y      ; 4
             sta ycount              ; 3
-            ldy mod7,x              ; 4
-            ldx applz_lo,y          ; 4
-                                    ; = 27
-eor_loop    ldy ypos                ; 3
-            lda hires_table_lo,y    ; 4
+
+            ldy ball_x              ; 3
+            lda div7,y              ; 4
+        ;   clc                     ; 2
+            adc #grid_screen_left   ; 2
+            sta ball_x              ; 3
+
+            txa                     ; 2
+        ;   clc                     ; 2
+            adc mod7,y              ; 4
+            tax                     ; 2
+
+            lda applz_lo,x          ; 4
+            sta .mod1+1             ; 4
+            sta .mod2+1             ; 4
+
+            lda applz_hi,x          ; 4
+            sta .mod1+2             ; 4
+            sta .mod2+2             ; 4
+
+            ldx #0                  ; 2
+            ldy ball_y              ; 3
+                                    ; = 77 + (63, 52, 54, 34)
+                                    ; = 140, 129, 131, 111
+
+.loop1      lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
             sta screenh             ; 3
-            ldy xpos                ; 3
-            lda appl0,x             ; 4
+            ldy ball_x              ; 3
+.mod1       lda $ffff,x             ; 4
             eor (screenl),y         ; 5
             sta (screenl),y         ; 5
             inx                     ; 2
             iny                     ; 2
-            lda appl0,x             ; 4
-            beq .1                  ; 2/3
+.mod2       lda $ffff,x             ; 4
+            beq .3                  ; 2/3
             eor (screenl),y         ; 5
             sta (screenl),y         ; 5
-.1          inx                     ; 2
-            inc ypos                ; 5
-            dec ycount              ; 5
-            bne eor_loop            ; 3/2
-                                    ; = 69 * 5 = 340
-            rts                     ; 6
-                                    ; = 373
+.3          inx                     ; 2
+            ldy ball_y              ; 3
+            iny                     ; 2
+            sty ball_y              ; 3
+            cpy ycount              ; 3
+            bne .loop1              ; 3/2
+                                    ; = 67 * 5 = 340
+common_exit rts                     ; 6
+
+; 373 * 2 = 746
+
+; 67 * 7 + 140 = 609
+; 67 * 6 + 130 = 531
+; 67 * 5 + 111 = 446
+
 
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
@@ -1753,14 +1884,6 @@ clear1      subroutine
             bne .1
             rts
 
-applz_lo    dc.b #<appl0
-            dc.b #<appl1
-            dc.b #<appl2
-            dc.b #<appl3
-            dc.b #<appl4
-            dc.b #<appl5
-            dc.b #<appl6
-
 dotz_lo     dc.b #<dot0
             dc.b #<dot1
             dc.b #<dot2
@@ -1771,90 +1894,33 @@ dotz_lo     dc.b #<dot0
 
             align 256
 
-appl0       dc.b %00001110, %00000000
-            dc.b %00011111, %00000000
-            dc.b %00011111, %00000000
-            dc.b %00011111, %00000000
-            dc.b %00001110, %00000000
-
-appl1       dc.b %00011100, %00000000
-            dc.b %00111110, %00000000
-            dc.b %00111110, %00000000
-            dc.b %00111110, %00000000
-            dc.b %00011100, %00000000
-
-appl2       dc.b %00111000, %00000000
-            dc.b %01111100, %00000000
-            dc.b %01111100, %00000000
-            dc.b %01111100, %00000000
-            dc.b %00111000, %00000000
-
-appl3       dc.b %01110000, %00000000
-            dc.b %01111000, %00000001
-            dc.b %01111000, %00000001
-            dc.b %01111000, %00000001
-            dc.b %01110000, %00000000
-
-appl4       dc.b %01100000, %00000001
-            dc.b %01110000, %00000011
-            dc.b %01110000, %00000011
-            dc.b %01110000, %00000011
-            dc.b %01100000, %00000001
-
-appl5       dc.b %01000000, %00000011
-            dc.b %01100000, %00000111
-            dc.b %01100000, %00000111
-            dc.b %01100000, %00000111
-            dc.b %01000000, %00000011
-
-appl6       dc.b %00000000, %00000111
-            dc.b %01000000, %00001111
-            dc.b %01000000, %00001111
-            dc.b %01000000, %00001111
-            dc.b %00000000, %00000111
-
-; TODO cut these down in height
 dot0        dc.b %00000000, %00000000
             dc.b %00001100, %00000000
             dc.b %00001100, %00000000
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot1        dc.b %00000000, %00000000
             dc.b %00011000, %00000000
             dc.b %00011000, %00000000
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot2        dc.b %00000000, %00000000
             dc.b %00110000, %00000000
             dc.b %00110000, %00000000
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot3        dc.b %00000000, %00000000
             dc.b %01100000, %00000000
             dc.b %01100000, %00000000
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot4        dc.b %00000000, %00000000
             dc.b %01000000, %00000001
             dc.b %01000000, %00000001
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot5        dc.b %00000000, %00000000
             dc.b %00000000, %00000011
             dc.b %00000000, %00000011
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
 dot6        dc.b %00000000, %00000000
             dc.b %00000000, %00000110
             dc.b %00000000, %00000110
-            dc.b %00000000, %00000000
-            dc.b %00000000, %00000000
 
             align 256
 
@@ -1992,5 +2058,6 @@ hires_table_hi
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
 
+            include applz.data.s
             include text.s
 
