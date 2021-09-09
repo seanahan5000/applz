@@ -1,4 +1,16 @@
 
+; ./dasm applz.s -lapplz.lst -f3 -oapplz
+
+            processor 6502
+
+            mac assume
+                if ({1})
+                else
+                    echo "Assumption failed: " {1}
+                    err
+                endif
+            endm
+
 double_speed = 1
 
 block_type1  = 1
@@ -21,11 +33,11 @@ grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 wave_x      = 31
 wave_y      = 20
 
-        do double_speed
+        if double_speed
 send_delay  = 8
         else
 send_delay  = 16
-        fin
+        endif
 
 scroll_delta = 4        ; number of lines stepped per grid scroll
 
@@ -166,55 +178,58 @@ start
 
             jmp first_wave_mode
 
-wave_str    STR "WAVE:"
+wave_str    dc.b 5,"WAVE:"
 
 ; TODO: move this code down lower in file
 
-clear_grid  lda #grid_height
+clear_grid  subroutine
+
+            lda #grid_height
             sta grid_row
             lda #0
             tay
-:1          iny
+.1          iny
             ldx #grid_width-2
-:2          sta block_grid,y
+.2          sta block_grid,y
             sta block_counts,y
             iny
             dex
-            bne :2
+            bne .2
             iny
             dec grid_row
-            bne :1
+            bne .1
             rts
 
-scroll_blocks
+scroll_blocks subroutine
+
             ldy #grid_size-grid_width-1
-:1          lda block_grid,y
+.1          lda block_grid,y
             sta block_grid+grid_width,y
             lda block_counts,y
             sta block_counts+grid_width,y
             dey
-            bpl :1
+            bpl .1
 
             ldy #grid_width-2
             lda #0
-:2          sta block_grid,y
+.2          sta block_grid,y
             sta block_counts,y
             dey
-            bne :2
+            bne .2
             rts
 
 ; TODO: page align
-block_grid  db -1, 0, 0, 0, 0, 0, 0, 0,-1
+block_grid  dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
             ; TODO: set -1 as part of clear
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
-            db -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
+            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
 
 block_counts
             ds grid_size,0
@@ -226,10 +241,10 @@ block_counts
 ; TODO: check for game over
 ;*** first time through, random number will always be the same
 
-next_wave_mode
+next_wave_mode subroutine
             ldx wave_index
             cpx #255            ; cap wave at 255
-            bcs :1
+            bcs .1
             inx
             sed
             lda wave_bcd0
@@ -240,10 +255,10 @@ next_wave_mode
             adc #0
             sta wave_bcd1
             cld
-:1          stx wave_index
+.1          stx wave_index
             stx appl_count      ; TODO: for now, bump applz along with wave
 
-first_wave_mode
+first_wave_mode subroutine
 
             ; draw wave number
 
@@ -257,42 +272,42 @@ first_wave_mode
 
             ; get number of blocks to create, from 2 to 6
 
-:1          jsr random
+.1          jsr random
             tax
             lda mod7,x
             cmp #2
-            bcc :1
+            bcc .1
             sta block_index
 
             ; create new blocks on top row, allowing at most one block double-up
             ;*** don't double up past 255 ***
 
-:2          jsr random
+.2          jsr random
             tax
             ldy mod7,x
             lda block_counts+1,Y
-            beq :3
+            beq .3
             cmp wave_index
-            bcs :2
-:3          clc
+            bcs .2
+.3          clc
             adc wave_index
             sta block_counts+1,y
             lda #block_type1        ; TODO: pick block_type2
             sta block_grid+1,y
             dec block_index
-            bne :2
+            bne .2
 
             ; draw new blocks on top row
 
             ldy #1
-:4          sty block_index
+.4          sty block_index
             lda block_grid,y
-            beq :5
+            beq .5
             jsr draw_block
             ldy block_index
-:5          iny
+.5          iny
             cpy #grid_width-1
-            bne :4
+            bne .4
 
             jsr scroll_blocks
             jsr scroll_screen_grid
@@ -303,7 +318,9 @@ first_wave_mode
 ; Aiming mode
 ;=======================================
 
-aiming_mode lda #16         ;*** dot count
+aiming_mode subroutine
+
+            lda #16         ;*** dot count
             sta dot_count
             lda #0
             sta appl_index
@@ -326,7 +343,7 @@ aiming_mode lda #16         ;*** dot count
             lda #$80
             sta angle
 
-:1          jsr update_angle
+.1          jsr update_angle
             lda angle_dx_frac
             sta dx_frac
             lda angle_dx_int
@@ -338,31 +355,32 @@ aiming_mode lda #16         ;*** dot count
 
             jsr draw_dotz
 
-:2          bit pbutton0        ; check for paddle 0 button press
+.2          bit pbutton0        ; check for paddle 0 button press
             bmi running_mode
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
-            bcs :3              ;*** TODO: clamp a little more?
+            bcs .3              ;*** TODO: clamp a little more?
             ldy #2
-:3          cpy #253
-            bcc :4
+.3          cpy #253
+            bcc .4
             ldy #253
-:4          cpy angle
-            beq :2              ; loop until something changes
+.4          cpy angle
+            beq .2              ; loop until something changes
             sty angle
 
             jsr erase_dotz
 
             ;*** keep disabled while debugging
             ;jsr random          ; update random number on input change
-            jmp :1
+            jmp .1
 
 ;=======================================
 ; Running mode
 ;=======================================
 
-running_mode
+running_mode subroutine
+
             ldx x_int
             lda y_int
             jsr eor_appl        ; erase aiming ball
@@ -373,93 +391,93 @@ running_mode
             lda #0
             sta applz_visible
             sta appl_slots
-            beq :first          ; always
+            beq .first          ; always
 
             ; update and redraw visible applz
 
-:loop1      ldx #0
-:loop2      stx appl_index
+.loop1      ldx #0
+.loop2      stx appl_index
 
             lda state,x         ; already complete?
-            bpl :skip4
+            bpl .skip4
 
             jsr update_appl
 
             lda state,x         ; newly complete?
-            bpl :skip4
+            bpl .skip4
 
-        do double_speed
+        if double_speed
         else
             lda x_int,x         ; check for change in x position
             cmp oldx_int,x
-            bne :skip3
+            bne .skip3
 
             lda y_int,x         ; check for change in y position
             cmp oldy_int,x
-            beq :skip4
-        fin
+            beq .skip4
+        endif
 
-:skip3      jsr erase_appl
+.skip3      jsr erase_appl
             jsr draw_appl
 
-:skip4      ldx appl_index
+.skip4      ldx appl_index
             inx
             cpx appl_slots
-            bne :loop2
+            bne .loop2
 
             dec send_countdown  ; check if it has been long enough to send
-            bne :loop1
+            bne .loop1
 
             lda #send_delay     ; reset send delay countdown
             sta send_countdown
 
             lda applz_ready     ; any applz left to send?
-            bne :skip5
+            bne .skip5
             lda applz_visible   ; any still visible?
-            bne :loop1
+            bne .loop1
             jmp next_wave_mode  ; no, start next wave
 
-:skip5      lda applz_visible   ; no more than 255 applz simultaneously
+.skip5      lda applz_visible   ; no more than 255 applz simultaneously
             cmp #255
-            beq :loop1
+            beq .loop1
 
-        do 0 ;new_slot_logic
+        if 0 ;new_slot_logic
 
             cmp appl_slots      ; if applz_visible == appl_slots
-            bne :skip6
-:first      ldx appl_slots
+            bne .skip6
+.first      ldx appl_slots
             inc appl_slots      ; consume next empty slot
-            bne :skip7          ; always
+            bne .skip7          ; always
 
-:skip6      ldx #0
-:loop3      lda state,x         ; walk slots looking for empty
-            bpl :skip7
+.skip6      ldx #0
+.loop3      lda state,x         ; walk slots looking for empty
+            bpl .skip7
             inx
             cpx appl_slots
-            bne :loop3
+            bne .loop3
 
             ;*** should have found a slot ***
-:hang       beq :hang       ;***
+.hang       beq .hang       ;***
 
-:skip7
+.skip7
         else
-:first      ldx appl_slots      ; get slot for new appl
+.first      ldx appl_slots      ; get slot for new appl
             cpx #255
-            beq :8
+            beq .8
 ;           cpx applz_visible
-;           bne :8
+;           bne .8
             inc appl_slots      ; consume next empty slot
-            bne :9              ; always
+            bne .9              ; always
 
-:8          lda state-1,x       ; search for open existing slot
-            bpl :9
+.8          lda state-1,x       ; search for open existing slot
+            bpl .9
             dex
-            bne :8
+            bne .8
             ;*** should have found a slot ***
-:hang       beq :hang       ;***
+.hang       beq .hang       ;***
 
-:9
-        fin
+.9
+        endif
 
             lda #$80            ; mark as active
             sta state,x
@@ -504,36 +522,37 @@ running_mode
             inc applz_visible
 
             jsr draw_appl       ;*** not needed on first pass ***
-            jmp :loop1
+            jmp .loop1
 
 ; set and convert applz_ready to BCD
 ;
 ; on entry:
 ;   a: applz_ready value
 
-set_applz_ready
+set_applz_ready subroutine
+
             sta applz_ready
             tax
             ldy #0
-:0          txa
+.0          txa
             sec
             sbc #100
-            bcc :1
+            bcc .1
             tax
             iny
-            bne :0              ; always
-:1          sty applz_ready_bcd1
+            bne .0              ; always
+.1          sty applz_ready_bcd1
 
             ldy #0
-:2          txa
+.2          txa
             sec
             sbc #10
-            bcc :3
+            bcc .3
             tax
             iny
-            bne :2              ; always
+            bne .2              ; always
 
-:3          stx applz_ready_bcd0
+.3          stx applz_ready_bcd0
             tya
             asl
             asl
@@ -554,8 +573,10 @@ draw_applz_ready
 
 ;---------------------------------------
 
-draw_dotz   ldx #1
-:1          stx appl_index
+draw_dotz   subroutine
+
+            ldx #1
+.1          stx appl_index
 
             ; copy dx and dy from previous dot
 
@@ -581,33 +602,35 @@ draw_dotz   ldx #1
 
             ; apply dx and dy multiple times
 
-        do double_speed
+        if double_speed
             lda #4
         else
             lda #8
-        fin
+        endif
             sta grid_col            ;***
             ldx appl_index
-:2          jsr update_dot
+.2          jsr update_dot
             dec grid_col
-            bne :2
+            bne .2
 
             jsr eor_dot
 
             ldx appl_index
             inx
             cpx dot_count
-            bne :1
+            bne .1
             rts
 
 
-erase_dotz  ldx #1
-:1          stx appl_index
+erase_dotz  subroutine
+
+            ldx #1
+.1          stx appl_index
             jsr eor_dot
             ldx appl_index
             inx
             cpx dot_count
-            bne :1
+            bne .1
             rts
 
 ;---------------------------------------
@@ -620,7 +643,9 @@ erase_dotz  ldx #1
 ; on exit:
 ;   x: appl_index
 ;
-update_dot  lda x_frac,x
+update_dot  subroutine
+
+            lda x_frac,x
             sta oldx_frac,x
             clc
             adc dx_frac,x
@@ -632,11 +657,11 @@ update_dot  lda x_frac,x
 
             ;*** get rid of ricochet
             cmp #21
-            bcc :1
+            bcc .1
             cmp #grid_screen_width - 21 - ball_width
-            bcc :2
-:1          jsr reflect_x
-:2
+            bcc .2
+.1          jsr reflect_x
+.2
             lda y_frac,x
             sta oldy_frac,x
             clc
@@ -661,7 +686,9 @@ update_dot  lda x_frac,x
 ; NOTE: Reflection code is optimized for fall through path
 ;   where all blocks are empty, since this is common case.
 ;
-update_appl lda x_frac,x                                ; 4
+update_appl subroutine
+
+            lda x_frac,x                                ; 4
             sta oldx_frac,x                             ; 4
             clc                                         ; 2
             adc dx_frac,x                               ; 4
@@ -689,9 +716,9 @@ update_appl lda x_frac,x                                ; 4
             sta y_int,x                                 ; 4
 
             cmp #192-ball_height                        ; 2     ; check for ball y wrapping
-            bcs :reverse_dy                             ; 2
+            bcs .reverse_dy                             ; 2
 
-:post_reverse_d7
+.post_reverse_d7
             tay                                         ; 2
             lda grid_y_table + block_gap,y              ; 4
             sta grid_top                                ; 3
@@ -709,31 +736,32 @@ update_appl lda x_frac,x                                ; 4
 
 ; reflect ball at top of screen
 
-:reverse_dy cmp #192+ball_height+1      ;*** sometimes wrong? *** (straight up/down) ***
-            bcc :ball_done
+.reverse_dy cmp #192+ball_height+1      ;*** sometimes wrong? *** (straight up/down) ***
+            bcc ball_done
             jsr reflect_y
-            jmp :post_reverse_d7
+            jmp .post_reverse_d7
 
 ; remove ball off bottom of screen
 
-:ball_done  jsr erase_appl
+ball_done   subroutine
+
             ldx appl_index
             lda #0
             sta state,x
             dec applz_visible
-            bne :3
+            bne .3
             lda applz_ready
-            bne :3
+            bne .3
 
             lda x_int,x         ; use final x for start/aim x
             cmp #block_width    ;   clamped to reasonable values
-            bcs :1
+            bcs .1
             lda #block_width
-:1          cmp #162
-            bcc :2
+.1          cmp #162
+            bcc .2
             lda #162            ; grid_screen_width - 21 - ball_width - 1
-:2          sta start_x
-:3          rts
+.2          sta start_x
+.3          rts
 
 left_right  lda grid_bottom
             bne left_right_y2   ; crossing two blocks vertically
@@ -750,13 +778,13 @@ left_right_y1
             adc grid_top
             tay
             lda dx_int,x        ; moving left or right?
-            bmi :left
+            bmi .left
             iny                 ; look at right edge
-:left       lda block_grid,y
-            bne :bounce_dx
+.left       lda block_grid,y
+            bne .bounce_dx
             rts
 
-:bounce_dx  jsr reflect_x
+.bounce_dx  jsr reflect_x
             jmp hit_block
 
 ;
@@ -783,22 +811,22 @@ up_down_x1  lda grid_left
             adc grid_top
             tay
             lda dy_int,x
-            bpl :down
+            bpl .down
 
-:up         lda block_grid,y
-            bne :bounce_dy
+.up         lda block_grid,y
+            bne .bounce_dy
             rts
 
-:down       lda block_grid+grid_width,y
-            bne :next_y_bounce_dy
+.down       lda block_grid+grid_width,y
+            bne .next_y_bounce_dy
             rts
 
-:next_y_bounce_dy
+.next_y_bounce_dy
             tya
             clc
             adc #grid_width
             tay
-:bounce_dy  jsr reflect_y
+.bounce_dy  jsr reflect_y
             jmp hit_block
 
 diag_up     lda dx_int,x
@@ -811,44 +839,45 @@ diag_up     lda dx_int,x
 ;  O      O             O| |   O      O| |   O| |
 ;                        +-+           +-+    +-+
 ;
-diag_up_right
+diag_up_right subroutine
+
             lda block_grid+grid_width+1,y
-            bne :dfg
+            bne .dfg
             lda block_grid,y
-            bne :ae
+            bne .ae
             lda block_grid+1,y
-            bne :b
+            bne .b
             rts
 
-:ae         lda block_grid+1,y
-            bne :e
+.ae         lda block_grid+1,y
+            bne .e
 
-:a          jsr reflect_y
+.a          jsr reflect_y
             jmp hit_block
 
-:e          jsr reflect_y
+.e          jsr reflect_y
             jsr hit_block
             iny
             jmp hit_block
 
-:b          iny
+.b          iny
             jsr reflect_y
             jsr reflect_x
             jmp hit_block
 
-:dfg        lda block_grid,y
-            bne :g
+.dfg        lda block_grid,y
+            bne .g
             lda block_grid+1,y
-            bne :f
+            bne .f
 
-:d          jsr reflect_x
+.d          jsr reflect_x
             tya
             clc
             adc #grid_width+1
             tay
             jmp hit_block
 
-:f          iny
+.f          iny
             jsr reflect_x
             jsr hit_block
             tya
@@ -857,7 +886,7 @@ diag_up_right
             tay
             jmp hit_block
 
-:g          jsr reflect_y
+.g          jsr reflect_y
             jsr reflect_x
             jsr hit_block
             tya
@@ -874,44 +903,45 @@ diag_up_right
 ;    O      O    | |O            O   | |O   | |O
 ;                +-+                 +-+    +-+
 ;
-diag_up_left
+diag_up_left subroutine
+
             lda block_grid+grid_width,y
-            bne :cfg
+            bne .cfg
             lda block_grid+1,y
-            bne :be
+            bne .be
             lda block_grid,y
-            bne :a_             ; TODO: why doesn't assembler like :a?
+            bne .a
             rts
 
-:be         lda block_grid,y
-            bne :e
+.be         lda block_grid,y
+            bne .e
 
-:b          iny
+.b          iny
             jsr reflect_y
             jmp hit_block
 
-:e          jsr reflect_y
+.e          jsr reflect_y
             jsr hit_block
             iny
             jmp hit_block
 
-:a_         jsr reflect_y
+.a          jsr reflect_y
             jsr reflect_x
             jmp hit_block
 
-:cfg        lda block_grid+1,y
-            bne :g
-:cf         lda block_grid,y
-            bne :f
+.cfg        lda block_grid+1,y
+            bne .g
+.cf         lda block_grid,y
+            bne .f
 
-:c          jsr reflect_x
+.c          jsr reflect_x
             tya
             clc
             adc #grid_width
             tay
             jmp hit_block
 
-:f          jsr reflect_x
+.f          jsr reflect_x
             jsr hit_block
             tya
             clc
@@ -919,7 +949,7 @@ diag_up_left
             tay
             jmp hit_block
 
-:g          jsr reflect_y
+.g          jsr reflect_y
             jsr reflect_x
             iny
             jsr hit_block
@@ -939,26 +969,27 @@ diag_down   lda dx_int,x
 ;                | |     | |  | | |    | |  | | .
 ;                +-+     +-+  +-+-+    +-+  +-+..
 ;
-diag_down_right
+diag_down_right subroutine
+
             lda block_grid+1,y
-            bne :bfg
+            bne .bfg
             lda block_grid+grid_width,y
-            bne :ce
+            bne .ce
             lda block_grid+grid_width+1,y
-            bne :d
+            bne .d
             rts
 
-:ce         lda block_grid+grid_width+1,y
-            bne :e
+.ce         lda block_grid+grid_width+1,y
+            bne .e
 
-:c          jsr reflect_y
+.c          jsr reflect_y
             tya
             clc
             adc #grid_width
             tay
             jmp hit_block
 
-:e          jsr reflect_y
+.e          jsr reflect_y
             tya
             clc
             adc #grid_width
@@ -967,7 +998,7 @@ diag_down_right
             iny
             jmp hit_block
 
-:d          jsr reflect_y
+.d          jsr reflect_y
             jsr reflect_x
             tya
             clc
@@ -975,16 +1006,16 @@ diag_down_right
             tay
             jmp hit_block
 
-:bfg        lda block_grid+grid_width,y
-            bne :g
-:bf         lda block_grid+grid_width+1,y
-            bne :f
+.bfg        lda block_grid+grid_width,y
+            bne .g
+.bf         lda block_grid+grid_width+1,y
+            bne .f
 
-:b          iny
+.b          iny
             jsr reflect_x
             jmp hit_block
 
-:f          iny
+.f          iny
             jsr reflect_x
             jsr hit_block
             tya
@@ -993,7 +1024,7 @@ diag_down_right
             tay
             jmp hit_block
 
-:g          jsr reflect_y
+.g          jsr reflect_y
             jsr reflect_x
             iny
             jsr hit_block
@@ -1011,26 +1042,27 @@ diag_down_right
 ;                | |     | |  | | |  | |    . | |
 ;                +-+     +-+  +-+-+  +-+    ..+-+
 ;
-diag_down_left
+diag_down_left subroutine
+
             lda block_grid,y
-            bne :afg
+            bne .afg
             lda block_grid+grid_width+1,y
-            bne :de
+            bne .de
             lda block_grid+grid_width,y
-            bne :c
+            bne .c
             rts
 
-:de         lda block_grid+grid_width,y
-            bne :e
+.de         lda block_grid+grid_width,y
+            bne .e
 
-:d          jsr reflect_y
+.d          jsr reflect_y
             tya
             clc
             adc #grid_width+1
             tay
             jmp hit_block
 
-:e          jsr reflect_y
+.e          jsr reflect_y
             tya
             clc
             adc #grid_width
@@ -1039,7 +1071,7 @@ diag_down_left
             iny
             jmp hit_block
 
-:c          jsr reflect_y
+.c          jsr reflect_y
             jsr reflect_x
             tya
             clc
@@ -1047,15 +1079,15 @@ diag_down_left
             tay
             jmp hit_block
 
-:afg        lda block_grid+grid_width+1,y
-            bne :g
-:af         lda block_grid+grid_width,y
-            bne :f
+.afg        lda block_grid+grid_width+1,y
+            bne .g
+.af         lda block_grid+grid_width,y
+            bne .f
 
-:a          jsr reflect_x
+.a          jsr reflect_x
             jmp hit_block
 
-:f          jsr reflect_x
+.f          jsr reflect_x
             jsr hit_block
             tya
             clc
@@ -1063,7 +1095,7 @@ diag_down_left
             tay
             jmp hit_block
 
-:g          jsr reflect_y
+.g          jsr reflect_y
             jsr reflect_x
             jsr hit_block
             tya
@@ -1125,12 +1157,14 @@ reflect_y   lda oldy_frac,x     ; back up to old y
 ;   x: ball index
 ;   y: block index
 ;
-hit_block   lda block_counts,y
-            beq :1              ; border blocks have zero count
+hit_block   subroutine
+
+            lda block_counts,y
+            beq .1              ; border blocks have zero count
             sec
             sbc #1
             sta block_counts,y
-            bne :2
+            bne .2
 
             lda #0
             sta block_grid,y
@@ -1138,9 +1172,9 @@ hit_block   lda block_counts,y
             jsr erase_block
             ldx appl_index      ; restore ball index
             ldy block_index     ; restore block index
-:1          rts
+.1          rts
 
-:2          lda block_grid,y
+.2          lda block_grid,y
             sty block_index
             jsr draw_block
             ldx appl_index      ; restore ball index
@@ -1149,7 +1183,7 @@ hit_block   lda block_counts,y
 
 ; divide by 21 table to convert x position into grid column
 ; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
-            ds  \,0
+            align 256
 grid_x_table
             ds  block_width,0
             ds  block_width,1
@@ -1164,7 +1198,7 @@ grid_x_table
 
 ; divide by 20 * grid_width table to convert y position into grid row offset
 ; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
-            ds  \,0
+            align 256
 grid_y_table
             ds  block_height,0*grid_width
             ds  block_height,1*grid_width
@@ -1183,11 +1217,12 @@ grid_y_table
 ;
 ; scroll all visible grid blocks down by one on screen
 ;
-scroll_screen_grid
+scroll_screen_grid subroutine
+
             lda #block_height/scroll_delta
             sta grid_row
-:1          ldx #191
-:2          lda hires_table_lo,x
+.1          ldx #191
+.2          lda hires_table_lo,x
             clc
             adc #grid_screen_left+3
             sta screenl
@@ -1201,39 +1236,40 @@ scroll_screen_grid
             lda hires_table_hi-scroll_delta,x
             sta sourceh
 
-            ldy #grid_width-2*3-1
+            ldy #(grid_width-2)*3-1
             ;*** self-modify these instead ***
-:3          lda (sourcel),y
+.3          lda (sourcel),y
             sta (screenl),y
             dey
-            bpl :3
+            bpl .3
 
             dex
             cpx #scroll_delta-1
-            bne :2
+            bne .2
 
-:4          lda hires_table_lo,x
+.4          lda hires_table_lo,x
             clc
             adc #grid_screen_left+3
             sta screenl
             lda hires_table_hi,x
             sta screenh
-            ldy #grid_width-2*3-1
+            ldy #(grid_width-2)*3-1
             lda #0
             ;*** self-modify this instead ***
-:5          sta (screenl),y
+.5          sta (screenl),y
             dey
-            bpl :5
+            bpl .5
             dex
-            bpl :4
+            bpl .4
 
             dec grid_row
-            bne :1
+            bne .1
             rts
 
-erase_screen_grid
+erase_screen_grid subroutine
+
             ldx #0
-:1          lda hires_table_lo,x
+.1          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1248,10 +1284,10 @@ erase_screen_grid
             ; clear main grid
 
             lda #0
-:2          sta (screenl),y
+.2          sta (screenl),y
             iny
             cpy #grid_width*3-3+grid_screen_left
-            bne :2
+            bne .2
 
             ; draw bar on right of grid
 
@@ -1260,7 +1296,7 @@ erase_screen_grid
 
             inx
             cpx #192
-            bne :1
+            bne .1
             rts
 
 ;---------------------------------------
@@ -1273,14 +1309,14 @@ erase_screen_grid
 update_angle
             lda angle
             tax
-            bpl :left
+            bpl .left
 
-:right      and #$7f
+.right      and #$7f
             tax
             eor #$7f
             tay
 
-        do double_speed
+        if double_speed
             lda sine_table,x
             asl
             sta angle_dx_frac
@@ -1306,13 +1342,13 @@ update_angle
             sta angle_dy_frac
             lda #$ff
             sta angle_dy_int
-        fin
+        endif
             rts
 
-:left       eor #$7f
+.left       eor #$7f
             tay
 
-        do double_speed
+        if double_speed
             lda sine_table,y
             eor #$ff
             asl
@@ -1340,7 +1376,7 @@ update_angle
             sta angle_dy_frac
             lda #$ff
             sta angle_dy_int
-        fin
+        endif
             rts
 
 ;
@@ -1373,13 +1409,14 @@ sine_table  hex 000306090c0f1215
 ;
 ; TODO: don't draw if block level doesn't change
 ;
-draw_block
+draw_block  subroutine
+
             ; choose color based on block type
 ;           ldx #$d5
 ;           cmp #block_type2
-;           bne :1
+;           bne .1
             ldx #$55
-:1          stx block_color
+.1          stx block_color
 
             lda grid_screen_rows,y
             tax
@@ -1390,10 +1427,10 @@ draw_block
             lda #block_height-block_gap
             sec
             sbc block_counts,y
-            beq :10
-            bcs :11
-:10         lda #1
-:11         clc
+            beq .10
+            bcs .11
+.10         lda #1
+.11         clc
             adc grid_screen_rows,y
             sta block_mid
 
@@ -1419,11 +1456,11 @@ draw_block
             sta (screenl),y
             dey
             dey
-            bpl :3              ; always
+            bpl .3              ; always
 
             ; draw empty box lines
 
-:2          lda hires_table_lo,x
+.2          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1442,14 +1479,14 @@ draw_block
             sta (screenl),y
             dey
             dey
-:3          inx
+.3          inx
             cpx block_mid
-            bne :2
-            beq :5              ; always
+            bne .2
+            beq .5              ; always
 
             ; draw full box lines
 
-:4          lda hires_table_lo,x
+.4          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1467,8 +1504,8 @@ draw_block
             dey
             dey
             inx
-:5          cpx block_bot
-            bne :4
+.5          cpx block_bot
+            bne .4
 
             ; last line
 
@@ -1494,23 +1531,24 @@ draw_block
             ; block pattern, reversed
             ; TODO: use this?
 
-            db  %01010101, %00101010, %00010101     ; filled line (8/8)
-            db  %01010001, %00101010, %00010101     ;             (7/8)
-            db  %01000001, %00101010, %00010101     ;             (6/8)
-            db  %00000001, %00101010, %00010101     ;             (5/8)
+            dc.b %01010101, %00101010, %00010101     ; filled line (8/8)
+            dc.b %01010001, %00101010, %00010101     ;             (7/8)
+            dc.b %01000001, %00101010, %00010101     ;             (6/8)
+            dc.b %00000001, %00101010, %00010101     ;             (5/8)
 
-            db  %00000001, %00101000, %00010101     ;             (4/8)
-            db  %00000001, %00100000, %00010101     ;             (3/8)
-            db  %00000001, %00000000, %00010101     ;             (2/8)
+            dc.b %00000001, %00101000, %00010101     ;             (4/8)
+            dc.b %00000001, %00100000, %00010101     ;             (3/8)
+            dc.b %00000001, %00000000, %00010101     ;             (2/8)
 
-            db  %00000001, %00000000, %00010100     ;             (1/8)
-            db  %00000001, %00000000, %00010000     ; empty line  (0/8)
+            dc.b %00000001, %00000000, %00010100     ;             (1/8)
+            dc.b %00000001, %00000000, %00010000     ; empty line  (0/8)
 
 ;
 ; on entry
 ;   y: grid index of block
 ;
-erase_block
+erase_block subroutine
+
             lda grid_screen_rows,y
             tax
             clc
@@ -1518,7 +1556,7 @@ erase_block
             sta block_bot
             lda grid_screen_cols,y
             tay
-:1          lda hires_table_lo,x
+.1          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1534,12 +1572,12 @@ erase_block
             dey
             inx
             cpx block_bot
-            bne :1
+            bne .1
             rts
 
-            err grid_height-10
-            err block_height-20
-            err grid_screen_top-0
+            assume grid_height=10
+            assume block_height=20
+            assume grid_screen_top=0
 
 grid_screen_rows
             ds  grid_width,0
@@ -1553,24 +1591,26 @@ grid_screen_rows
             ds  grid_width,160
             ds  grid_width,180
 
-            err grid_screen_left-6
-            err block_width-21
+            assume grid_screen_left=6
+            assume block_width=21
 
 grid_screen_cols
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
-            db  6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 6,9,12,15,18,21,24,27,30
 ;
 ; eor the dot shape
 ;
-eor_dot     ldy appl_index
+eor_dot     subroutine
+
+            ldy appl_index
             ldx x_int,y
             lda y_int,y
             sta ypos
@@ -1629,10 +1669,10 @@ eor_loop    ldy ypos                ; 3
             inx                     ; 2
             iny                     ; 2
             lda appl0,x             ; 4
-            beq :1                  ; 2/3
+            beq .1                  ; 2/3
             eor (screenl),y         ; 5
             sta (screenl),y         ; 5
-:1          inx                     ; 2
+.1          inx                     ; 2
             inc ypos                ; 5
             dec ycount              ; 5
             bne eor_loop            ; 3/2
@@ -1673,9 +1713,11 @@ random      lda seed1
 ;
 ; clear primary screen to black
 ;
-clear1      ldx #0
+clear1      subroutine
+
+            ldx #0
             txa
-:1          sta $2000,x
+.1          sta $2000,x
             sta $2100,x
             sta $2200,x
             sta $2300,x
@@ -1708,113 +1750,113 @@ clear1      ldx #0
             sta $3e00,x
             sta $3f00,x
             inx
-            bne :1
+            bne .1
             rts
 
-applz_lo    db  #<appl0
-            db  #<appl1
-            db  #<appl2
-            db  #<appl3
-            db  #<appl4
-            db  #<appl5
-            db  #<appl6
+applz_lo    dc.b #<appl0
+            dc.b #<appl1
+            dc.b #<appl2
+            dc.b #<appl3
+            dc.b #<appl4
+            dc.b #<appl5
+            dc.b #<appl6
 
-dotz_lo     db  #<dot0
-            db  #<dot1
-            db  #<dot2
-            db  #<dot3
-            db  #<dot4
-            db  #<dot5
-            db  #<dot6
+dotz_lo     dc.b #<dot0
+            dc.b #<dot1
+            dc.b #<dot2
+            dc.b #<dot3
+            dc.b #<dot4
+            dc.b #<dot5
+            dc.b #<dot6
 
-            ds  \,0
+            align 256
 
-appl0       db  %00001110, %00000000
-            db  %00011111, %00000000
-            db  %00011111, %00000000
-            db  %00011111, %00000000
-            db  %00001110, %00000000
+appl0       dc.b %00001110, %00000000
+            dc.b %00011111, %00000000
+            dc.b %00011111, %00000000
+            dc.b %00011111, %00000000
+            dc.b %00001110, %00000000
 
-appl1       db  %00011100, %00000000
-            db  %00111110, %00000000
-            db  %00111110, %00000000
-            db  %00111110, %00000000
-            db  %00011100, %00000000
+appl1       dc.b %00011100, %00000000
+            dc.b %00111110, %00000000
+            dc.b %00111110, %00000000
+            dc.b %00111110, %00000000
+            dc.b %00011100, %00000000
 
-appl2       db  %00111000, %00000000
-            db  %01111100, %00000000
-            db  %01111100, %00000000
-            db  %01111100, %00000000
-            db  %00111000, %00000000
+appl2       dc.b %00111000, %00000000
+            dc.b %01111100, %00000000
+            dc.b %01111100, %00000000
+            dc.b %01111100, %00000000
+            dc.b %00111000, %00000000
 
-appl3       db  %01110000, %00000000
-            db  %01111000, %00000001
-            db  %01111000, %00000001
-            db  %01111000, %00000001
-            db  %01110000, %00000000
+appl3       dc.b %01110000, %00000000
+            dc.b %01111000, %00000001
+            dc.b %01111000, %00000001
+            dc.b %01111000, %00000001
+            dc.b %01110000, %00000000
 
-appl4       db  %01100000, %00000001
-            db  %01110000, %00000011
-            db  %01110000, %00000011
-            db  %01110000, %00000011
-            db  %01100000, %00000001
+appl4       dc.b %01100000, %00000001
+            dc.b %01110000, %00000011
+            dc.b %01110000, %00000011
+            dc.b %01110000, %00000011
+            dc.b %01100000, %00000001
 
-appl5       db  %01000000, %00000011
-            db  %01100000, %00000111
-            db  %01100000, %00000111
-            db  %01100000, %00000111
-            db  %01000000, %00000011
+appl5       dc.b %01000000, %00000011
+            dc.b %01100000, %00000111
+            dc.b %01100000, %00000111
+            dc.b %01100000, %00000111
+            dc.b %01000000, %00000011
 
-appl6       db  %00000000, %00000111
-            db  %01000000, %00001111
-            db  %01000000, %00001111
-            db  %01000000, %00001111
-            db  %00000000, %00000111
+appl6       dc.b %00000000, %00000111
+            dc.b %01000000, %00001111
+            dc.b %01000000, %00001111
+            dc.b %01000000, %00001111
+            dc.b %00000000, %00000111
 
 ; TODO cut these down in height
-dot0        db  %00000000, %00000000
-            db  %00001100, %00000000
-            db  %00001100, %00000000
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot0        dc.b %00000000, %00000000
+            dc.b %00001100, %00000000
+            dc.b %00001100, %00000000
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot1        db  %00000000, %00000000
-            db  %00011000, %00000000
-            db  %00011000, %00000000
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot1        dc.b %00000000, %00000000
+            dc.b %00011000, %00000000
+            dc.b %00011000, %00000000
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot2        db  %00000000, %00000000
-            db  %00110000, %00000000
-            db  %00110000, %00000000
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot2        dc.b %00000000, %00000000
+            dc.b %00110000, %00000000
+            dc.b %00110000, %00000000
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot3        db  %00000000, %00000000
-            db  %01100000, %00000000
-            db  %01100000, %00000000
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot3        dc.b %00000000, %00000000
+            dc.b %01100000, %00000000
+            dc.b %01100000, %00000000
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot4        db  %00000000, %00000000
-            db  %01000000, %00000001
-            db  %01000000, %00000001
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot4        dc.b %00000000, %00000000
+            dc.b %01000000, %00000001
+            dc.b %01000000, %00000001
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot5        db  %00000000, %00000000
-            db  %00000000, %00000011
-            db  %00000000, %00000011
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot5        dc.b %00000000, %00000000
+            dc.b %00000000, %00000011
+            dc.b %00000000, %00000011
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-dot6        db  %00000000, %00000000
-            db  %00000000, %00000110
-            db  %00000000, %00000110
-            db  %00000000, %00000000
-            db  %00000000, %00000000
+dot6        dc.b %00000000, %00000000
+            dc.b %00000000, %00000110
+            dc.b %00000000, %00000110
+            dc.b %00000000, %00000000
+            dc.b %00000000, %00000000
 
-            ds  \,0
+            align 256
 
 div7        hex 00000000000000
             hex 01010101010101
@@ -1854,7 +1896,7 @@ div7        hex 00000000000000
             hex 23232323232323
             hex 24242424
 
-            ds  \,0
+            align 256
 
 mod7        hex 00010203040506
             hex 00010203040506
@@ -1894,7 +1936,7 @@ mod7        hex 00010203040506
             hex 00010203040506
             hex 00010203
 
-            ds  \,0
+            align 256
 
 hires_table_lo
             hex 0000000000000000
@@ -1922,7 +1964,7 @@ hires_table_lo
             hex 5050505050505050
             hex d0d0d0d0d0d0d0d0
 
-            ds  \,0
+            align 256
 
 hires_table_hi
             hex 2024282c3034383c
@@ -1950,5 +1992,5 @@ hires_table_hi
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
 
-            put text.s
+            include text.s
 
