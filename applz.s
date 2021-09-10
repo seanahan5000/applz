@@ -92,8 +92,6 @@ block_left  = $39
 block_mid   = $3a
 block_bot   = $3b
 
-grid_bottom = $3c   ;*** get rid of
-
 wave_index  = $40
 wave_bcd0   = $41
 wave_bcd1   = $42
@@ -666,6 +664,7 @@ update_dot  subroutine
 ; NOTE: Reflection code is optimized for fall through path
 ;   where all blocks are empty, since this is common case.
 ;
+
 update_appl subroutine
 
             lda x_frac,x                                ; 4
@@ -701,31 +700,17 @@ update_appl subroutine
             sta ball_dy                                 ; 3
             tay                                         ; 2
 
-;           lda grid_y_table + block_gap,y              ; 4
-;           sta grid_top                                ; 3
-;           cmp grid_y_table + ball_height - 1,y        ; 4
-;           bne up_down                                 ; 2     ; crossed horizontal block edge
-;           lda grid_dx                                 ; 3
-;           bne left_right_xx                           ; 2     ; crossed vertical block edge
-;           jmp move_appl                               ; 4
-;                                                       ; = 110
-
             lda grid_y_table + block_gap,y              ; 4
             sta grid_top                                ; 3
-            lda grid_y_table + ball_height - 1,y        ; 4
-            sec                                         ; 2
-            sbc grid_top                                ; 3
-            sta grid_bottom                             ; 3
-
-            lda grid_dx   ;grid_right                   ; 3
-            bne left_right                              ; 2     ; crossed vertical block edge
-            lda grid_bottom                             ; 3
-            bne up_down_x1                              ; 2     ; crossed horizontal block edge
-            jmp move_appl                               ; 4
-
+            cmp grid_y_table + ball_height - 1,y        ; 4
+            bne up_down                                 ; 2     ; crossed horizontal block edge
+            lda grid_dx                                 ; 3
+            bne left_right_y1                           ; 2     ; crossed vertical block edge
+            jmp move_appl                               ; 4     ; TODO: get rid of
+                                                        ; = 110
 ; reflect ball at top of screen
 
-.reverse_dy cmp #192+ball_height+1      ;*** sometimes wrong? *** (straight up/down) ***
+.reverse_dy cmp #192+ball_height+1
             bcc ball_done
             jsr reflect_y
             jmp .post_reverse_d7
@@ -756,8 +741,38 @@ ball_done   subroutine
 .2          sta start_x
 .3          rts
 
-left_right  lda grid_bottom
-            bne left_right_y2   ; crossing two blocks vertically
+;
+; ball moving vertically crossed horizontal edge on single block
+;
+;   +-+   O
+;   | |  +O+
+;   +O+  | |
+;    O   +-+
+;
+up_down     lda grid_dx
+            bne left_right_y2
+up_down_x1  lda grid_left
+            clc
+            adc grid_top
+            tay
+            lda dy_int,x
+            bpl .down
+
+.up         lda block_grid,y
+            bne .bounce_dy
+            jmp move_appl       ; TODO: get rid of
+
+.down       lda block_grid+grid_width,y
+            bne .next_y_bounce_dy
+            jmp move_appl       ; TODO: get rid of
+
+.next_y_bounce_dy
+            tya
+            clc
+            adc #grid_width
+            tay
+.bounce_dy  jsr reflect_y
+            jmp hit_move_appl   ; TODO: get rid of
 
 ;
 ; ball moving horizontally crossed vertical edge on single block
@@ -776,11 +791,10 @@ left_right_y1
             iny                 ; look at right edge
 .left       lda block_grid,y
             bne .bounce_dx
-            jmp move_appl
+            jmp move_appl       ; TODO: get rid of
 
 .bounce_dx  jsr reflect_x
-            jmp hit_block_move_appl
-
+            jmp hit_move_appl   ; TODO: get rid of
 ;
 ; ball moving horizontally crossed vertical edge on two blocks
 ;
@@ -792,36 +806,6 @@ left_right_y2
             lda dy_int,x
             bmi diag_up
             jmp diag_down
-;
-; ball moving vertically crossed horizontal edge on single block
-;
-;   +-+   O
-;   | |  +O+
-;   +O+  | |
-;    O   +-+
-;
-up_down_x1  lda grid_left
-            clc
-            adc grid_top
-            tay
-            lda dy_int,x
-            bpl .down
-
-.up         lda block_grid,y
-            bne .bounce_dy
-            jmp move_appl
-
-.down       lda block_grid+grid_width,y
-            bne .next_y_bounce_dy
-            jmp move_appl
-
-.next_y_bounce_dy
-            tya
-            clc
-            adc #grid_width
-            tay
-.bounce_dy  jsr reflect_y
-            jmp hit_block_move_appl
 
 diag_up     lda dx_int,x
             bmi diag_up_left
@@ -841,23 +825,23 @@ diag_up_right subroutine
             bne .ae
             lda block_grid+1,y
             bne .b
-            jmp move_appl
+            jmp move_appl_ur
 
 .ae         lda block_grid+1,y
             bne .e
 
 .a          jsr reflect_y
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dr
 
 .e          jsr reflect_y
             jsr hit_block
             iny
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dr
 
 .b          iny
             jsr reflect_y
             jsr reflect_x
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 .dfg        lda block_grid,y
             bne .g
@@ -869,7 +853,7 @@ diag_up_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ul
 
 .f          iny
             jsr reflect_x
@@ -878,7 +862,7 @@ diag_up_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ul
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -887,7 +871,7 @@ diag_up_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 ;
 ;   a      b       c     d      e      f      g
@@ -905,23 +889,23 @@ diag_up_left subroutine
             bne .be
             lda block_grid,y
             bne .a
-            jmp move_appl
+            jmp move_appl_ul
 
 .be         lda block_grid,y
             bne .e
 
 .b          iny
             jsr reflect_y
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dl
 
 .e          jsr reflect_y
             jsr hit_block
             iny
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dl
 
 .a          jsr reflect_y
             jsr reflect_x
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 .cfg        lda block_grid+1,y
             bne .g
@@ -933,7 +917,7 @@ diag_up_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ur
 
 .f          jsr reflect_x
             jsr hit_block
@@ -941,7 +925,7 @@ diag_up_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ur
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -951,7 +935,7 @@ diag_up_left subroutine
             clc
             adc #grid_width-1
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 diag_down   lda dx_int,x
             bmi diag_down_left
@@ -971,7 +955,7 @@ diag_down_right subroutine
             bne .ce
             lda block_grid+grid_width+1,y
             bne .d
-            jmp move_appl
+            jmp move_appl_dr
 
 .ce         lda block_grid+grid_width+1,y
             bne .e
@@ -981,7 +965,7 @@ diag_down_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ur
 
 .e          jsr reflect_y
             tya
@@ -990,7 +974,7 @@ diag_down_right subroutine
             tay
             jsr hit_block
             iny
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ur
 
 .d          jsr reflect_y
             jsr reflect_x
@@ -998,7 +982,7 @@ diag_down_right subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 .bfg        lda block_grid+grid_width,y
             bne .g
@@ -1007,7 +991,7 @@ diag_down_right subroutine
 
 .b          iny
             jsr reflect_x
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dl
 
 .f          iny
             jsr reflect_x
@@ -1016,7 +1000,7 @@ diag_down_right subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dl
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -1026,7 +1010,7 @@ diag_down_right subroutine
             clc
             adc #grid_width-1
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 ;
 ;   a      b       c     d      e      f      g
@@ -1044,7 +1028,7 @@ diag_down_left subroutine
             bne .de
             lda block_grid+grid_width,y
             bne .c
-            jmp move_appl
+            jmp move_appl_dl
 
 .de         lda block_grid+grid_width,y
             bne .e
@@ -1054,7 +1038,7 @@ diag_down_left subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ul
 
 .e          jsr reflect_y
             tya
@@ -1063,7 +1047,7 @@ diag_down_left subroutine
             tay
             jsr hit_block
             iny
-            jmp hit_block_move_appl
+            jmp hit_move_appl_ul
 
 .c          jsr reflect_y
             jsr reflect_x
@@ -1071,7 +1055,7 @@ diag_down_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 .afg        lda block_grid+grid_width+1,y
             bne .g
@@ -1079,7 +1063,7 @@ diag_down_left subroutine
             bne .f
 
 .a          jsr reflect_x
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dr
 
 .f          jsr reflect_x
             jsr hit_block
@@ -1087,7 +1071,7 @@ diag_down_left subroutine
             clc
             adc #grid_width
             tay
-            jmp hit_block_move_appl
+            jmp hit_move_appl_dr
 
 .g          jsr reflect_y
             jsr reflect_x
@@ -1096,7 +1080,7 @@ diag_down_left subroutine
             clc
             adc #grid_width+1
             tay
-            jmp hit_block_move_appl
+            jmp hit_no_move
 
 ;
 ; reflect x/y,dx/dy without altering block counts
@@ -1653,118 +1637,80 @@ eor_dot     subroutine
             bne .1
             rts
 
-eor_appl    stx ball_x
-            stx ball_dx
-            sta ball_y
-            sta ball_dy
-            ldy #0
-            ldx #0
-            clc
-            bcc common_appl         ; always
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
-; dx * 8 + dy * 2 + ur/dl
+; TODO: temporary, to be phased out as callers are cleaned up
 
-hit_block_move_appl
+hit_move_appl subroutine
+
             jsr hit_block
 
 move_appl   subroutine
 
             lda ball_dy             ; 3
+            cmp ball_y              ; 3
+            bcc .up                 ; 2/3
+            jmp move_down
+
+.up         lda ball_dx             ; 3
+            cmp ball_x              ; 3
+            bcs move_appl_ur        ; 2/3
+            bcc move_appl_ul        ; 3 always
+
+; TODO: this may eventually call back into main appl update look
+hit_no_move jmp hit_block
+
+; eor move:
+;
+;   67 * 7 + 93 = 474 + 93 = 567
+;   67 * 6 + 93 = 407 + 93 = 500
+;   67 * 5 + 93 = 340 + 93 = 433
+;
+; simple erase/draw:
+;
+;   373 * 2 = 746
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+hit_move_appl_ul subroutine
+
+            jsr hit_block
+
+move_appl_ul subroutine
+
+            lda ball_x              ; 3
             sec                     ; 2
-            sbc ball_y              ; 3
-            bcs .down               ; 2/3
-
-.up         eor #$ff                ; 3
-            tax                     ; 2
-            lda ball_dy             ; 3
-            sta ball_y              ; 3
-            inx                     ; 2
-            stx ball_dy             ; 3
-
-            lda ball_dx             ; 3
+            sbc ball_dx             ; 3
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_y              ; 3
             sec                     ; 2
-            sbc ball_x              ; 3
-            bcs .up_right           ; 2/3
+            sbc ball_dy             ; 3
+            beq .exit               ; 2/3
+            asl                     ; 2
 
-.up_left    eor #$ff                ; 3
-            tax                     ; 2
-            lda ball_dx             ; 3
-            sta ball_x              ; 3
-            inx                     ; 2
-            txa                     ; 2
-
-            asl                     ; 2
-            asl                     ; 2
-        ;   clc
-            adc ball_dy             ; 3
-            asl                     ; 2
-            bcc xxx                 ; 3 always
-                                    ; = 63
-
-.up_right   asl                     ; 2
-            asl                     ; 2
-        ;   clc
-            adc ball_dy             ; 3
-            asl                     ; 2
-        ;   clc
-            adc #1                  ; 3
-            bcc xxx                 ; 3 always
-                                    ; = 52
-
-.down       sta ball_dy             ; 3
-
-            lda ball_dx             ; 3
-            sec                     ; 2
-            sbc ball_x              ; 3
-            bcs .down_right         ; 2/3
-
-.down_left  eor #$ff                ; 3
-            tax                     ; 2
-            lda ball_dx             ; 3
-            sta ball_x              ; 3
-            inx                     ; 2
-            txa                     ; 2
-
-            asl                     ; 2
-            asl                     ; 2
-        ;   clc
-            adc ball_dy             ; 3
-            asl                     ; 2
-        ;   clc
-            adc #1                  ; 3
-            bcc xxx                 ; 3 always
-                                    ; = 54
-
-.down_right asl                     ; 2
-            asl                     ; 2
-        ;   clc
-            adc ball_dy             ; 3
-            asl                     ; 2
-        ;   bcc xxx                 ; 3 always
-                                    ; = 34
-
-xxx         tay                     ; 2
-            asl                     ; 2
+            tay                     ; 2
+            asl                     ; 2     * 8 pre-shifted shapes
             asl                     ; 2
             asl                     ; 2
             tax                     ; 2
 
-            beq common_exit         ; 2/3
-
-common_appl
-            lda ball_y              ; 3
-        ;   clc                     ; 2
+            lda ball_dy             ; 3     y/dy
+        ;   clc
             adc appl_heights,y      ; 4
             sta ycount              ; 3
 
-            ldy ball_x              ; 3
+            ldy ball_dx             ; 3     x/dx
             lda div7,y              ; 4
-        ;   clc                     ; 2
+        ;   clc
             adc #grid_screen_left   ; 2
             sta ball_x              ; 3
 
             txa                     ; 2
-        ;   clc                     ; 2
+        ;   clc
             adc mod7,y              ; 4
             tax                     ; 2
 
@@ -1777,11 +1723,10 @@ common_appl
             sta .mod2+2             ; 4
 
             ldx #0                  ; 2
-            ldy ball_y              ; 3
-                                    ; = 77 + (63, 52, 54, 34)
-                                    ; = 140, 129, 131, 111
+            ldy ball_dy             ; 3     y/dy
+                                    ; = 93
 
-.loop1      lda hires_table_lo,y    ; 4
+.loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
             sta screenh             ; 3
@@ -1792,24 +1737,318 @@ common_appl
             inx                     ; 2
             iny                     ; 2
 .mod2       lda $ffff,x             ; 4
-            beq .3                  ; 2/3
+            beq .skip0              ; 2/3
             eor (screenl),y         ; 5
             sta (screenl),y         ; 5
-.3          inx                     ; 2
+.skip0      inx                     ; 2
+            ldy ball_dy             ; 3     y/dy
+            iny                     ; 2
+            sty ball_dy             ; 3     y/dy
+            cpy ycount              ; 3
+            bne .loop               ; 3/2
+                                    ; = 67 (340/407/474)
+.exit       rts                     ; 6
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+hit_move_appl_ur subroutine
+
+            jsr hit_block
+
+move_appl_ur subroutine
+
+            lda ball_dx             ; 3
+            sec                     ; 2
+            sbc ball_x              ; 3
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_y              ; 3
+            sec                     ; 2
+            sbc ball_dy             ; 3
+            beq .exit               ; 2/3
+            asl                     ; 2
+        ;   clc
+            adc #1                  ; 3
+
+            tay                     ; 2
+            asl                     ; 2     * 8 pre-shifted shapes
+            asl                     ; 2
+            asl                     ; 2
+            tax                     ; 2
+
+            lda ball_dy             ; 3     y/dy
+        ;   clc
+            adc appl_heights,y      ; 4
+            sta ycount              ; 3
+
+            ldy ball_x              ; 3     x/dx
+            lda div7,y              ; 4
+        ;   clc
+            adc #grid_screen_left   ; 2
+            sta ball_x              ; 3
+
+            txa                     ; 2
+        ;   clc
+            adc mod7,y              ; 4
+            tax                     ; 2
+
+            lda applz_lo,x          ; 4
+            sta .mod1+1             ; 4
+            sta .mod2+1             ; 4
+
+            lda applz_hi,x          ; 4
+            sta .mod1+2             ; 4
+            sta .mod2+2             ; 4
+
+            ldx #0                  ; 2
+            ldy ball_dy             ; 3     y/dy
+                                    ; = 96
+
+.loop       lda hires_table_lo,y    ; 4
+            sta screenl             ; 3
+            lda hires_table_hi,y    ; 4
+            sta screenh             ; 3
+            ldy ball_x              ; 3
+.mod1       lda $ffff,x             ; 4
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+            inx                     ; 2
+            iny                     ; 2
+.mod2       lda $ffff,x             ; 4
+            beq .skip0              ; 2/3
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+.skip0      inx                     ; 2
+            ldy ball_dy             ; 3     y/dy
+            iny                     ; 2
+            sty ball_dy             ; 3     y/dy
+            cpy ycount              ; 3
+            bne .loop               ; 3/2
+                                    ; = 67 (340/407/474)
+.exit       rts                     ; 6
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+; TODO: temporary, to be phased out as callers are cleaned up
+move_down   lda ball_dx             ; 3
+            cmp ball_x              ; 3
+            bcs move_appl_dr        ; 2/3
+            bcc move_appl_dl        ; 3 always
+
+hit_move_appl_dl subroutine
+
+            jsr hit_block
+
+move_appl_dl subroutine
+
+            lda ball_x              ; 3     ((dx * 4) + dy) * 2 + ur_dl
+            sec                     ; 2
+            sbc ball_dx             ; 3
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            sec                     ; 2
+            sbc ball_y              ; 3
+            beq .exit               ; 2/3   no movement
+            asl                     ; 2
+        ;   clc
+            adc #1                  ; 3     + ur_dl
+
+            tay                     ; 2
+            asl                     ; 2     * 8 pre-shifted shapes
+            asl                     ; 2
+            asl                     ; 2
+            tax                     ; 2
+
+            lda ball_y              ; 3     y/dy
+        ;   clc
+            adc appl_heights,y      ; 4
+            sta ycount              ; 3
+
+            ldy ball_dx             ; 3     x/dx
+            lda div7,y              ; 4
+        ;   clc
+            adc #grid_screen_left   ; 2
+            sta ball_x              ; 3
+
+            txa                     ; 2
+        ;   clc
+            adc mod7,y              ; 4
+            tax                     ; 2
+
+            lda applz_lo,x          ; 4
+            sta .mod1+1             ; 4
+            sta .mod2+1             ; 4
+
+            lda applz_hi,x          ; 4
+            sta .mod1+2             ; 4
+            sta .mod2+2             ; 4
+
+            ldx #0                  ; 2
+            ldy ball_y              ; 3     y/dy
+                                    ; = 96
+
+.loop       lda hires_table_lo,y    ; 4
+            sta screenl             ; 3
+            lda hires_table_hi,y    ; 4
+            sta screenh             ; 3
+            ldy ball_x              ; 3
+.mod1       lda $ffff,x             ; 4
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+            inx                     ; 2
+            iny                     ; 2
+.mod2       lda $ffff,x             ; 4
+            beq .skip0              ; 2/3
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+.skip0      inx                     ; 2
+            ldy ball_y              ; 3     y/dy
+            iny                     ; 2
+            sty ball_y              ; 3     y/dy
+            cpy ycount              ; 3
+            bne .loop               ; 3/2
+                                    ; = 67 (340/407/474)
+.exit       rts                     ; 6
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+hit_move_appl_dr subroutine
+
+            jsr hit_block
+
+move_appl_dr subroutine
+
+            lda ball_dx             ; 3     ((dx * 4) + dy) * 2
+            sec                     ; 2
+            sbc ball_x              ; 3
+            asl                     ; 2
+            asl                     ; 2
+        ;   clc
+            adc ball_dy             ; 3
+            sec                     ; 2
+            sbc ball_y              ; 3
+            beq .exit               ; 2/3
+            asl                     ; 2
+
+            tay                     ; 2
+            asl                     ; 2     * 8 pre-shifted shapes
+            asl                     ; 2
+            asl                     ; 2
+            tax                     ; 2
+
+            lda ball_y              ; 3     y/dy
+        ;   clc
+            adc appl_heights,y      ; 4
+            sta ycount              ; 3
+
+            ldy ball_x              ; 3     x/dx
+            lda div7,y              ; 4
+        ;   clc
+            adc #grid_screen_left   ; 2
+            sta ball_x              ; 3
+
+            txa                     ; 2
+        ;   clc
+            adc mod7,y              ; 4
+            tax                     ; 2
+
+            lda applz_lo,x          ; 4
+            sta .mod1+1             ; 4
+            sta .mod2+1             ; 4
+
+            lda applz_hi,x          ; 4
+            sta .mod1+2             ; 4
+            sta .mod2+2             ; 4
+
+            ldx #0                  ; 2
+            ldy ball_y              ; 3     y/dy
+                                    ; = 93
+
+.loop       lda hires_table_lo,y    ; 4
+            sta screenl             ; 3
+            lda hires_table_hi,y    ; 4
+            sta screenh             ; 3
+            ldy ball_x              ; 3
+.mod1       lda $ffff,x             ; 4
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+            inx                     ; 2
+            iny                     ; 2
+.mod2       lda $ffff,x             ; 4
+            beq .skip0              ; 2/3
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+.skip0      inx                     ; 2
+            ldy ball_y              ; 3     y/dy
+            iny                     ; 2
+            sty ball_y              ; 3     y/dy
+            cpy ycount              ; 3
+            bne .loop               ; 3/2
+                                    ; = 67 (340/407/474)
+.exit       rts                     ; 6
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+
+;
+; on entry:
+;   X: x coordinate
+;   A: y coordinate
+;
+eor_appl    subroutine
+
+            sta ball_y
+            clc
+            adc #ball_height
+            sta ycount
+
+            lda div7,x
+        ;   clc
+            adc #grid_screen_left
+            sta ball_x
+
+            ldy mod7,x
+
+            lda applz_lo,y
+            sta .mod1+1
+            sta .mod2+1
+
+            lda applz_hi,y
+            sta .mod1+2
+            sta .mod2+2
+
+            ldx #0
+            ldy ball_y
+.loop       lda hires_table_lo,y    ; 4
+            sta screenl             ; 3
+            lda hires_table_hi,y    ; 4
+            sta screenh             ; 3
+            ldy ball_x              ; 3
+.mod1       lda $ffff,x             ; 4
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+            inx                     ; 2
+            iny                     ; 2
+.mod2       lda $ffff,x             ; 4
+            beq .skip0              ; 2/3
+            eor (screenl),y         ; 5
+            sta (screenl),y         ; 5
+.skip0      inx                     ; 2
             ldy ball_y              ; 3
             iny                     ; 2
             sty ball_y              ; 3
             cpy ycount              ; 3
-            bne .loop1              ; 3/2
-                                    ; = 67 * 5 = 340
-common_exit rts                     ; 6
+            bne .loop               ; 3/2
+.exit       rts
 
-; 373 * 2 = 746
-
-; 67 * 7 + 140 = 609
-; 67 * 6 + 130 = 531
-; 67 * 5 + 111 = 446
-
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
 
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
