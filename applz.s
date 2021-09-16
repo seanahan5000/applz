@@ -33,6 +33,8 @@ grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 wave_x      = 31
 wave_y      = 20
 
+throttle_ballz = 16     ; under this ball count, add delay
+
         if double_speed
 send_delay  = 8
         else
@@ -65,18 +67,17 @@ angle_dx_frac = $17
 angle_dx_int  = $18
 angle_dy_frac = $19
 angle_dy_int  = $1a
+button_up     = $1b     ; saw button up between unthrottle mode and aiming
 
-start_x       = $1b     ; variable position relative to grid edge
-send_countdown = $1c
+start_x       = $1c     ; variable position relative to grid edge
+send_countdown = $1d
 
 appl_count  = $1f       ; total number of applz the player has collected
 
 screenl     = $20
 screenh     = $21
-sourcel     = $22
-sourceh     = $23
-seed0       = $24
-seed1       = $25
+seed0       = $22
+seed1       = $23
 
 grid_left   = $30
 grid_dx     = $31
@@ -106,15 +107,14 @@ ball_dx     = $49
 ball_y      = $4a
 ball_dy     = $4b
 
-state       = $1000     ; high bit set when visible/active
-x_frac      = $1100
-x_int       = $1200
-dx_frac     = $1300
-dx_int      = $1400
-y_frac      = $1500
-y_int       = $1600
-dy_frac     = $1700
-dy_int      = $1800
+x_frac      = $1000
+x_int       = $1100
+dx_frac     = $1200
+dx_int      = $1300
+y_frac      = $1400
+y_int       = $1500
+dy_frac     = $1600
+dy_int      = $1700
 
 ; TODO: use correct abbreviations
 keyboard    = $C000
@@ -131,11 +131,12 @@ pbutton0    = $C061
 PREAD       = $FB1E
 
 ; TODO:
-;   - keyboard aiming support?
+;   - ballz in grid w/animation
+;   - game over detection
+;   - real scoring/high score
+;   - improved block emptying
 ;   - remove aiming richochet
-;
-; PERF:
-;   - throttle ball redraw rate
+;   - keyboard aiming support?
 
             org $6000
 
@@ -180,6 +181,7 @@ start
 wave_str    dc.b 5,"WAVE:"
 
 ; TODO: move this code down lower in file
+; TODO: nobody currently calls this
 
 clear_grid  subroutine
 
@@ -341,8 +343,10 @@ aiming_mode subroutine
 
             lda #$80
             sta angle
+            lda #0
+            sta button_up
 
-.1          jsr update_angle
+.loop1      jsr update_angle
             lda angle_dx_frac
             sta dx_frac
             lda angle_dx_int
@@ -354,25 +358,30 @@ aiming_mode subroutine
 
             jsr draw_dotz
 
-.2          bit pbutton0        ; check for paddle 0 button press
-            bmi running_mode
+.loop2      ldx #1
+            bit pbutton0        ; check for paddle 0 button press
+            bpl .1
+            ldx button_up       ; must have seen button up once in case
+            bne running_mode    ;   unthrottled mode was being used coming in
+.1          stx button_up
+
             ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #2              ; clamp value to [2,253]
-            bcs .3              ;*** TODO: clamp a little more?
+            bcs .2              ;*** TODO: clamp a little more?
             ldy #2
-.3          cpy #253
-            bcc .4
+.2          cpy #253
+            bcc .3
             ldy #253
-.4          cpy angle
-            beq .2              ; loop until something changes
+.3          cpy angle
+            beq .loop2          ; loop until something changes
             sty angle
 
             jsr erase_dotz
 
             ;*** keep disabled while debugging
             ;jsr random          ; update random number on input change
-            jmp .1
+            jmp .loop1
 
 ;=======================================
 ; Running mode
@@ -387,6 +396,7 @@ running_mode subroutine
 
             lda #send_delay
             sta send_countdown
+
             lda #0
             sta applz_visible
             sta appl_slots
@@ -396,73 +406,44 @@ running_mode subroutine
 
 .loop1      ldx #0
 .loop2      stx appl_index
-
-            lda state,x         ; already complete?
-            bpl .skip4
-
             jsr update_appl
-
-.skip4      ldx appl_index
+            ldx appl_index
             inx
             cpx appl_slots
             bne .loop2
 
-            dec send_countdown  ; check if it has been long enough to send
+            ; add delay for low ball counts
+            ;   (~600 cycles per ball below throttle_ballz)
+
+            bit pbutton0        ; check for paddle 0 button press
+            bmi .nodelay
+            lda #throttle_ballz
+            sec
+            sbc appl_slots
+            bcc .nodelay
+            beq .nodelay
+            tax
+.delay1     ldy #120             ; 120 * 5 cycles
+.delay2     dey
+            bne .delay2
+            dex
+            bne .delay1
+.nodelay
+
+            lda applz_ready     ; any applz left to send?
+            bne .send
+            lda applz_visible   ; any still visible?
+            bne .loop1
+            jmp next_wave_mode  ; no, start next wave
+
+.send       dec send_countdown  ; check if it has been long enough to send
             bne .loop1
 
             lda #send_delay     ; reset send delay countdown
             sta send_countdown
 
-            lda applz_ready     ; any applz left to send?
-            bne .skip5
-            lda applz_visible   ; any still visible?
-            bne .loop1
-            jmp next_wave_mode  ; no, start next wave
-
-.skip5      lda applz_visible   ; no more than 255 applz simultaneously
-            cmp #255
-            beq .loop1
-
-        if 0 ;new_slot_logic
-
-            cmp appl_slots      ; if applz_visible == appl_slots
-            bne .skip6
 .first      ldx appl_slots
-            inc appl_slots      ; consume next empty slot
-            bne .skip7          ; always
-
-.skip6      ldx #0
-.loop3      lda state,x         ; walk slots looking for empty
-            bpl .skip7
-            inx
-            cpx appl_slots
-            bne .loop3
-
-            ;*** should have found a slot ***
-.hang       beq .hang       ;***
-
-.skip7
-        else
-.first      ldx appl_slots      ; get slot for new appl
-            cpx #255
-            beq .8
-;           cpx applz_visible
-;           bne .8
-            inc appl_slots      ; consume next empty slot
-            bne .9              ; always
-
-.8          lda state-1,x       ; search for open existing slot
-            bpl .9
-            dex
-            bne .8
-            ;*** should have found a slot ***
-.hang       beq .hang       ;***
-
-.9
-        endif
-
-            lda #$80            ; mark as active
-            sta state,x
+            inc appl_slots
 
             lda start_x         ; set start position
             sta x_int,x
@@ -499,11 +480,10 @@ running_mode subroutine
 
             inc applz_visible
 
-            ; TODO: change interface to clean this up
             ldy appl_index
             ldx x_int,y
             lda y_int,y
-            jsr eor_appl       ;*** not needed on first pass ***
+            jsr eor_appl
             jmp .loop1
 
 ; set and convert applz_ready to BCD
@@ -653,6 +633,67 @@ update_dot  subroutine
 
 ;---------------------------------------
 ;
+; remove ball off bottom of screen
+
+ball_done   subroutine
+
+            ldx ball_x
+            lda ball_y
+            jsr eor_appl
+
+            ldx appl_index
+            dec applz_visible
+            bne .1
+            lda applz_ready
+            beq wave_done
+.1
+            ldy appl_slots
+            dey
+            sty appl_slots
+
+            cpx appl_slots
+            beq .2
+
+            ; if completed ball is not in last slot,
+            ;   move down ball in last slot to fill in gap
+
+            lda x_frac,y
+            sta x_frac,x
+            lda x_int,y
+            sta x_int,x
+            lda dx_frac,y
+            sta dx_frac,x
+            lda dx_int,y
+            sta dx_int,x
+            lda y_frac,y
+            sta y_frac,x
+            lda y_int,y
+            sta y_int,x
+            lda dy_frac,y
+            sta dy_frac,x
+            lda dy_int,y
+            sta dy_int,x
+
+            ; moved ball becomes next to be processed
+
+.2          dex
+            stx appl_index
+            rts
+
+wave_done   subroutine
+
+            lda x_int,x         ; use final x for start/aim x
+            cmp #block_width    ;   clamped to reasonable values
+            bcs .1
+            lda #block_width
+.1          cmp #162
+            bcc .2
+            lda #162            ; grid_screen_width - 21 - ball_width - 1
+.2          sta start_x
+            rts
+
+;---------------------------------------
+;
 ; update single appl position
 ;
 ; on entry:
@@ -711,35 +752,10 @@ update_appl subroutine
 ; reflect ball at top of screen
 
 .reverse_dy cmp #192+ball_height+1
-            bcc ball_done
+            bcc .ball_done
             jsr reflect_y
             jmp .post_reverse_d7
-
-; remove ball off bottom of screen
-
-ball_done   subroutine
-
-            ldx ball_x
-            lda ball_y
-            jsr eor_appl
-
-            ldx appl_index
-            lda #0
-            sta state,x
-            dec applz_visible
-            bne .3
-            lda applz_ready
-            bne .3
-
-            lda x_int,x         ; use final x for start/aim x
-            cmp #block_width    ;   clamped to reasonable values
-            bcs .1
-            lda #block_width
-.1          cmp #162
-            bcc .2
-            lda #162            ; grid_screen_width - 21 - ball_width - 1
-.2          sta start_x
-.3          rts
+.ball_done  jmp ball_done
 
 ;
 ; ball moving vertically crossed horizontal edge on single block
@@ -1215,45 +1231,43 @@ scroll_screen_grid subroutine
             lda #block_height/scroll_delta
             sta grid_row
 .1          ldx #191
-.2          lda hires_table_lo,x
+.2          lda hires_table_lo-scroll_delta,x
             clc
             adc #grid_screen_left+3
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
+            sta .mod1+1
+            lda hires_table_hi-scroll_delta,x
+            sta .mod1+2
 
-            lda hires_table_lo-scroll_delta,x
+            lda hires_table_lo,x
         ;   clc
             adc #grid_screen_left+3
-            sta sourcel
-            lda hires_table_hi-scroll_delta,x
-            sta sourceh
+            sta .mod2+1
+            lda hires_table_hi,x
+            sta .mod2+2
 
             ldy #(grid_width-2)*3-1
-            ;*** self-modify these instead ***
-.3          lda (sourcel),y
-            sta (screenl),y
+.mod1       lda $ffff,y
+.mod2       sta $ffff,y
             dey
-            bpl .3
+            bpl .mod1
 
             dex
             cpx #scroll_delta-1
             bne .2
 
-.4          lda hires_table_lo,x
+.3          lda hires_table_lo,x
             clc
             adc #grid_screen_left+3
-            sta screenl
+            sta .mod3+1
             lda hires_table_hi,x
-            sta screenh
+            sta .mod3+2
             ldy #(grid_width-2)*3-1
             lda #0
-            ;*** self-modify this instead ***
-.5          sta (screenl),y
+.mod3       sta $ffff,y
             dey
-            bpl .5
+            bpl .mod3
             dex
-            bpl .4
+            bpl .3
 
             dec grid_row
             bne .1
