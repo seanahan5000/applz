@@ -116,6 +116,9 @@ y_int       = $1500
 dy_frac     = $1600
 dy_int      = $1700
 
+block_grid   = $1800    ; grid_size bytes used
+block_counts = $1880    ; grid_size bytes used
+
 ; TODO: use correct abbreviations
 keyboard    = $C000
 unstrobe    = $C010
@@ -132,11 +135,12 @@ PREAD       = $FB1E
 
 ; TODO:
 ;   - ballz in grid w/animation
-;   - game over detection
-;   - real scoring/high score
 ;   - improved block emptying
+;   - orange/blue blocks
+;   - real scoring/high score
 ;   - remove aiming richochet
 ;   - keyboard aiming support?
+;   - sound + disable toggle UI
 
             org $6000
 
@@ -148,21 +152,8 @@ start
             lda #$34
             sta seed1
 
-            lda #1
-            sta wave_bcd0
-            sta wave_index
-            sta appl_count
-
-            lda #0
-            sta wave_bcd1
-
             jsr clear1
             jsr erase_screen_grid
-
-            sta primary
-            sta fullscreen
-            sta hires
-            sta graphics
 
             ; draw "wave:"
 
@@ -173,6 +164,22 @@ start
             ldy #>wave_str
             jsr draw_string
 
+            sta primary
+            sta fullscreen
+            sta hires
+            sta graphics
+
+restart     jsr clear_grid
+            jsr erase_screen_grid
+
+            lda #1
+            sta wave_bcd0
+            sta wave_index
+            sta appl_count
+
+            lda #0
+            sta wave_bcd1
+
             lda #72         ; TODO: use a constant
             sta start_x
 
@@ -181,15 +188,17 @@ start
 wave_str    dc.b 5,"WAVE:"
 
 ; TODO: move this code down lower in file
-; TODO: nobody currently calls this
 
 clear_grid  subroutine
 
             lda #grid_height
             sta grid_row
+            ldy #0
+.1          lda #-1
+            sta block_grid,y
+            sta block_grid+grid_width-1,y
+            iny
             lda #0
-            tay
-.1          iny
             ldx #grid_width-2
 .2          sta block_grid,y
             sta block_counts,y
@@ -219,28 +228,9 @@ scroll_blocks subroutine
             bne .2
             rts
 
-; TODO: page align
-block_grid  dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            ; TODO: set -1 as part of clear
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-            dc.b -1, 0, 0, 0, 0, 0, 0, 0,-1
-
-block_counts
-            ds grid_size,0
-
 ;=======================================
 ; Wave mode
 ;=======================================
-
-; TODO: check for game over
-;*** first time through, random number will always be the same
 
 next_wave_mode subroutine
             ldx wave_index
@@ -313,7 +303,32 @@ first_wave_mode subroutine
             jsr scroll_blocks
             jsr scroll_screen_grid
 
-            ; fall through
+            ; check for game over when blocks in bottom row are non-zero
+
+            ldy #1
+.6          lda block_grid+grid_size-grid_width,y
+            bne game_over
+            iny
+            cpy #grid_width-1
+            bne .6
+            beq aiming_mode     ; always
+
+game_over   subroutine
+
+            ; TODO: put up "game over" graphic
+
+            ; make sure button has been seen as up,
+            ;   then wait for it to go down again before restarting
+
+.1          bit pbutton0
+            bmi .1
+.2          bit pbutton0
+            bpl .2
+
+            ; TODO: erase "game over" graphic
+            ; TODO: erase old text?
+
+            jmp restart
 
 ;=======================================
 ; Aiming mode
@@ -400,6 +415,7 @@ running_mode subroutine
             lda #0
             sta applz_visible
             sta appl_slots
+            sta button_up
             beq .first          ; always
 
             ; update and redraw visible applz
@@ -412,12 +428,23 @@ running_mode subroutine
             cpx appl_slots
             bne .loop2
 
+            ; check for throttling ball movement speed
+            ;   (must have seen button up once in case
+            ;   unthrottled mode was being used coming in)
+
+            ldx button_up
+            bne .1
+            bit pbutton0
+            bmi .throttle
+            ldx #1
+            stx button_up
+.1          bit pbutton0
+            bmi .nodelay
+
             ; add delay for low ball counts
             ;   (~600 cycles per ball below throttle_ballz)
 
-            bit pbutton0        ; check for paddle 0 button press
-            bmi .nodelay
-            lda #throttle_ballz
+.throttle   lda #throttle_ballz
             sec
             sbc appl_slots
             bcc .nodelay
