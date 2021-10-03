@@ -11,39 +11,36 @@
                 endif
             endm
 
-double_speed = 1
+block_type_appl = $01
+block_type_edge = $80
+block_type_gv   = $81
+block_type_ob   = $82
 
-block_type1  = 1
-block_type2  = 2
-block_width  = 21   ; including gap
-block_height = 20   ; including gap
-block_gap    = 2
+block_width     = 21   ; including gap
+block_height    = 20   ; including gap
+block_gap       = 2
 
-ball_width  = 5
-ball_height = 5
-dot_height  = 3
+ball_width      = 5
+ball_height     = 5
+dot_height      = 3
 
 grid_screen_left = 6    ; in bytes
-grid_screen_top  = 0  ;***block_height
-grid_width  = 9     ; includes left and right padding
-grid_height = 10    ; includes bottom dead space
-grid_size   = grid_width * grid_height
+grid_screen_top = 0     ; assumed implicitly
+grid_width      = 9     ; includes left and right padding
+grid_height     = 10    ; includes bottom dead space
+grid_size       = grid_width * grid_height
 grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 
-wave_x      = 31
-wave_y      = 20
+wave_x          = 31    ; in bytes
+wave_y          = 20
 
 throttle_ballz = 16     ; under this ball count, add delay
 
-        if double_speed
-send_delay  = 8
-        else
-send_delay  = 16
-        endif
+send_delay      = 8
 
-scroll_delta = 4        ; number of lines stepped per grid scroll
+scroll_delta    = 4     ; number of lines stepped per grid scroll
 
-start_y     = 192 - ball_height
+start_y         = 192 - ball_height
 
 temp          = $00
 xpos          = $01
@@ -134,10 +131,10 @@ pbutton0    = $C061
 PREAD       = $FB1E
 
 ; TODO:
-;   - ballz in grid w/animation
+;   - ballz in grid (w/animation?)
 ;   - improved block emptying
-;   - orange/blue blocks
 ;   - real scoring/high score
+;   - orange/blue blocks
 ;   - remove aiming richochet
 ;   - keyboard aiming support?
 ;   - sound + disable toggle UI
@@ -194,7 +191,7 @@ clear_grid  subroutine
             lda #grid_height
             sta grid_row
             ldy #0
-.1          lda #-1
+.1          lda #block_type_edge
             sta block_grid,y
             sta block_grid+grid_width-1,y
             iny
@@ -261,6 +258,16 @@ first_wave_mode subroutine
             lda wave_bcd0
             jsr draw_number
 
+            ; randomly place new ball block
+
+            jsr random
+            tax
+            ldy mod7,x
+            iny
+            lda #block_type_appl
+            sta block_grid,y
+            jsr eor_block_appl
+
             ; get number of blocks to create, from 2 to 6
 
 .1          jsr random
@@ -271,34 +278,54 @@ first_wave_mode subroutine
             sta block_index
 
             ; create new blocks on top row, allowing at most one block double-up
-            ;*** don't double up past 255 ***
 
 .2          jsr random
             tax
             ldy mod7,x
-            lda block_counts+1,Y
+            iny
+            lda block_grid,y
+            cmp #block_type_appl    ; exclude block that already holds a new appl
+            beq .2
+            lda block_counts,Y
             beq .3
             cmp wave_index
             bcs .2
 .3          clc
             adc wave_index
-            sta block_counts+1,y
-            lda #block_type1        ; TODO: pick block_type2
-            sta block_grid+1,y
+            bcc .4
+            lda #255                ; clamp counter to maximum value
+.4          sta block_counts,y
+            lda #block_type_gv      ; TODO: pick block_type_ob
+            sta block_grid,y
             dec block_index
             bne .2
 
             ; draw new blocks on top row
 
             ldy #1
-.4          sty block_index
-            lda block_grid,y
-            beq .5
+.5          lda block_grid,y
+            bpl .6
+            sty block_index
             jsr draw_block
             ldy block_index
-.5          iny
+.6          iny
             cpy #grid_width-1
-            bne .4
+            bne .5
+
+            ; erase any appl blocks before they scroll to bottom
+
+            ldy #grid_size-grid_width*2+1
+.7          lda block_grid,y
+            cmp #block_type_appl
+            bne .8
+            sty block_index
+            lda #0
+            sta block_grid,y
+            jsr eor_block_appl
+            ldy block_index
+.8          iny
+            cpy #grid_size-grid_width-1
+            bne .7
 
             jsr scroll_blocks
             jsr scroll_screen_grid
@@ -306,11 +333,11 @@ first_wave_mode subroutine
             ; check for game over when blocks in bottom row are non-zero
 
             ldy #1
-.6          lda block_grid+grid_size-grid_width,y
-            bne game_over
+.9          lda block_grid+grid_size-grid_width,y
+            bmi game_over
             iny
             cpy #grid_width-1
-            bne .6
+            bne .9
             beq aiming_mode     ; always
 
 game_over   subroutine
@@ -394,8 +421,7 @@ aiming_mode subroutine
 
             jsr erase_dotz
 
-            ;*** keep disabled while debugging
-            ;jsr random          ; update random number on input change
+            jsr random          ; update random number on input change
             jmp .loop1
 
 ;=======================================
@@ -591,11 +617,7 @@ draw_dotz   subroutine
 
             ; apply dx and dy multiple times
 
-        if double_speed
             lda #4
-        else
-            lda #8
-        endif
             sta grid_col            ;***
             ldx appl_index
 .2          jsr update_dot
@@ -774,6 +796,9 @@ update_appl subroutine
             bne up_down                                 ; 2     ; crossed horizontal block edge
             lda grid_dx                                 ; 3
             bne left_right_y1                           ; 2     ; crossed vertical block edge
+
+            ; TODO: collide with new apple block
+
             jmp move_appl                               ; 4     ; TODO: get rid of
                                                         ; = 110
 ; reflect ball at top of screen
@@ -802,11 +827,11 @@ up_down_x1  lda grid_left
             bpl .down
 
 .up         lda block_grid,y
-            bne .bounce_dy
+            bmi .bounce_dy
             jmp move_appl       ; TODO: get rid of
 
 .down       lda block_grid+grid_width,y
-            bne .next_y_bounce_dy
+            bmi .next_y_bounce_dy
             jmp move_appl       ; TODO: get rid of
 
 .next_y_bounce_dy
@@ -833,7 +858,7 @@ left_right_y1
             bmi .left
             iny                 ; look at right edge
 .left       lda block_grid,y
-            bne .bounce_dx
+            bmi .bounce_dx
             jmp move_appl       ; TODO: get rid of
 
 .bounce_dx  jsr reflect_x
@@ -863,15 +888,15 @@ diag_up     lda dx_int,x
 diag_up_right subroutine
 
             lda block_grid+grid_width+1,y
-            bne .dfg
+            bmi .dfg
             lda block_grid,y
-            bne .ae
+            bmi .ae
             lda block_grid+1,y
-            bne .b
+            bmi .b
             jmp move_appl_ur
 
 .ae         lda block_grid+1,y
-            bne .e
+            bmi .e
 
 .a          jsr reflect_y
             jmp hit_move_appl_dr
@@ -887,9 +912,9 @@ diag_up_right subroutine
             jmp hit_no_move
 
 .dfg        lda block_grid,y
-            bne .g
+            bmi .g
             lda block_grid+1,y
-            bne .f
+            bmi .f
 
 .d          jsr reflect_x
             tya
@@ -927,15 +952,15 @@ diag_up_right subroutine
 diag_up_left subroutine
 
             lda block_grid+grid_width,y
-            bne .cfg
+            bmi .cfg
             lda block_grid+1,y
-            bne .be
+            bmi .be
             lda block_grid,y
-            bne .a
+            bmi .a
             jmp move_appl_ul
 
 .be         lda block_grid,y
-            bne .e
+            bmi .e
 
 .b          iny
             jsr reflect_y
@@ -951,9 +976,9 @@ diag_up_left subroutine
             jmp hit_no_move
 
 .cfg        lda block_grid+1,y
-            bne .g
+            bmi .g
 .cf         lda block_grid,y
-            bne .f
+            bmi .f
 
 .c          jsr reflect_x
             tya
@@ -993,15 +1018,15 @@ diag_down   lda dx_int,x
 diag_down_right subroutine
 
             lda block_grid+1,y
-            bne .bfg
+            bmi .bfg
             lda block_grid+grid_width,y
-            bne .ce
+            bmi .ce
             lda block_grid+grid_width+1,y
-            bne .d
+            bmi .d
             jmp move_appl_dr
 
 .ce         lda block_grid+grid_width+1,y
-            bne .e
+            bmi .e
 
 .c          jsr reflect_y
             tya
@@ -1028,9 +1053,9 @@ diag_down_right subroutine
             jmp hit_no_move
 
 .bfg        lda block_grid+grid_width,y
-            bne .g
+            bmi .g
 .bf         lda block_grid+grid_width+1,y
-            bne .f
+            bmi .f
 
 .b          iny
             jsr reflect_x
@@ -1066,15 +1091,15 @@ diag_down_right subroutine
 diag_down_left subroutine
 
             lda block_grid,y
-            bne .afg
+            bmi .afg
             lda block_grid+grid_width+1,y
-            bne .de
+            bmi .de
             lda block_grid+grid_width,y
-            bne .c
+            bmi .c
             jmp move_appl_dl
 
 .de         lda block_grid+grid_width,y
-            bne .e
+            bmi .e
 
 .d          jsr reflect_y
             tya
@@ -1101,9 +1126,9 @@ diag_down_left subroutine
             jmp hit_no_move
 
 .afg        lda block_grid+grid_width+1,y
-            bne .g
+            bmi .g
 .af         lda block_grid+grid_width,y
-            bne .f
+            bmi .f
 
 .a          jsr reflect_x
             jmp hit_move_appl_dr
@@ -1351,7 +1376,8 @@ update_angle subroutine
             eor #$7f
             tay
 
-        if double_speed
+            ; double all values
+
             lda sine_table,x
             asl
             sta angle_dx_frac
@@ -1366,24 +1392,13 @@ update_angle subroutine
             lda #$ff
             rol
             sta angle_dy_int
-        else
-            lda sine_table,x
-            sta angle_dx_frac
-            lda #0
-            sta angle_dx_int
-
-            lda sine_table,y
-            eor #$ff
-            sta angle_dy_frac
-            lda #$ff
-            sta angle_dy_int
-        endif
             rts
 
 .left       eor #$7f
             tay
 
-        if double_speed
+            ; double all values
+
             lda sine_table,y
             eor #$ff
             asl
@@ -1399,19 +1414,6 @@ update_angle subroutine
             lda #$ff
             rol
             sta angle_dy_int
-        else
-            lda sine_table,y
-            eor #$ff
-            sta angle_dx_frac
-            lda #$ff
-            sta angle_dx_int
-
-            lda sine_table,x
-            eor #$ff
-            sta angle_dy_frac
-            lda #$ff
-            sta angle_dy_int
-        endif
             rts
 
 ;
@@ -1448,8 +1450,8 @@ draw_block  subroutine
 
             ; choose color based on block type
 ;           ldx #$d5
-;           cmp #block_type2
-;           bne .1
+;           cmp #block_type_ob
+;           beq .1
             ldx #$55
 .1          stx block_color
 
@@ -1609,6 +1611,60 @@ erase_block subroutine
             cpx block_bot
             bne .1
             rts
+
+;
+; on entry
+;   y: grid index of block
+;
+eor_block_appl subroutine
+
+block_appl_height = 9
+
+            lda grid_screen_rows,y
+            clc
+            adc #(block_height-block_gap-block_appl_height)/2
+            sta block_top
+;           clc
+            adc #block_appl_height
+            sta block_bot
+
+            lda grid_screen_cols,y
+            sta block_left
+;           clc
+            adc #block_width / 7
+            sta block_mid
+
+            ldx #0
+            ldy block_top
+.loop1      lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+            ldy block_left
+.loop2      lda block_appl_shape,x
+            eor (screenl),y
+            sta (screenl),y
+            inx
+            iny
+            cpy block_mid
+            bne .loop2
+            ldy block_top
+            iny
+            sty block_top
+            cpy block_bot
+            bne .loop1
+            rts
+
+block_appl_shape
+            dc.b %00000000, %01111111, %00000000
+            dc.b %01000000, %01000001, %00000001
+            dc.b %01100000, %00011100, %00000011
+            dc.b %01100000, %00111110, %00000011
+            dc.b %01100000, %00111110, %00000011
+            dc.b %01100000, %00111110, %00000011
+            dc.b %01100000, %00011100, %00000011
+            dc.b %01000000, %01000001, %00000001
+            dc.b %00000000, %01111111, %00000000
 
             assume grid_height=10
             assume block_height=20
