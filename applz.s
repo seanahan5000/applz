@@ -131,11 +131,10 @@ pbutton0    = $C061
 PREAD       = $FB1E
 
 ; TODO:
-;   - ballz in grid (w/animation?)
 ;   - improved block emptying
 ;   - real scoring/high score
 ;   - orange/blue blocks
-;   - remove aiming richochet
+;   - remove aiming ricochet
 ;   - keyboard aiming support?
 ;   - sound + disable toggle UI
 
@@ -244,7 +243,6 @@ next_wave_mode subroutine
             sta wave_bcd1
             cld
 .1          stx wave_index
-            stx appl_count      ; TODO: for now, bump applz along with wave
 
 first_wave_mode subroutine
 
@@ -794,13 +792,17 @@ update_appl subroutine
             sta grid_top                                ; 3
             cmp grid_y_table + ball_height - 1,y        ; 4
             bne up_down                                 ; 2     ; crossed horizontal block edge
+            clc                                         ; 2
+            adc grid_left                               ; 3
+            tay                                         ; 2
             lda grid_dx                                 ; 3
             bne left_right_y1                           ; 2     ; crossed vertical block edge
 
-            ; TODO: collide with new apple block
+            lda block_grid,y                            ; 4
+            bne collide_appl                            ; 2/3
 
             jmp move_appl                               ; 4     ; TODO: get rid of
-                                                        ; = 110
+                                                        ; = 123
 ; reflect ball at top of screen
 
 .reverse_dy cmp #192+ball_height+1
@@ -808,6 +810,20 @@ update_appl subroutine
             jsr reflect_y
             jmp .post_reverse_d7
 .ball_done  jmp ball_done
+
+; check for collision with appl block
+
+collide_appl
+            ; TODO: check for exact collision?
+            ldx appl_count
+            inx
+            beq .1              ; clamp to 255
+            stx appl_count
+.1          lda #0
+            sta block_grid,y
+            jsr eor_block_appl
+            ldx appl_index      ; restore ball index
+            jmp move_appl
 
 ;
 ; ball moving vertically crossed horizontal edge on single block
@@ -850,10 +866,6 @@ up_down_x1  lda grid_left
 ;   +-+   +-+
 ;
 left_right_y1
-            lda grid_left
-            clc
-            adc grid_top
-            tay
             lda dx_int,x        ; moving left or right?
             bmi .left
             iny                 ; look at right edge
@@ -1449,10 +1461,10 @@ sine_table  hex 000306090c0f1215
 draw_block  subroutine
 
             ; choose color based on block type
-;           ldx #$d5
+            ldx #$d5
 ;           cmp #block_type_ob
 ;           beq .1
-            ldx #$55
+;           ldx #$55
 .1          stx block_color
 
             lda grid_screen_rows,y
@@ -1634,7 +1646,14 @@ block_appl_height = 9
             adc #block_width / 7
             sta block_mid
 
+            ; choose shifted or non-shifted shape based on column
+
             ldx #0
+            lda block_left
+            lsr
+            bcs .1
+            ldx #block_appl_height*(block_width / 7)
+.1
             ldy block_top
 .loop1      lda hires_table_lo,y
             sta screenl
@@ -1656,15 +1675,35 @@ block_appl_height = 9
             rts
 
 block_appl_shape
-            dc.b %00000000, %01111111, %00000000
-            dc.b %01000000, %01000001, %00000001
-            dc.b %01100000, %00011100, %00000011
-            dc.b %01100000, %00111110, %00000011
-            dc.b %01100000, %00111110, %00000011
-            dc.b %01100000, %00111110, %00000011
-            dc.b %01100000, %00011100, %00000011
-            dc.b %01000000, %01000001, %00000001
-            dc.b %00000000, %01111111, %00000000
+            dc.b %00000000, %00101000, %00000000
+            dc.b %00000000, %00001000, %00000000
+            dc.b %00000000, %00101010, %00000000
+            dc.b %11000000, %10101010, %10000001
+            dc.b %11000000, %10101010, %10000000
+            dc.b %00000000, %01010101, %00000000
+            dc.b %11000000, %10101010, %10000000
+            dc.b %11000000, %10101010, %10000001
+            dc.b %10000000, %11010101, %10000000
+
+            dc.b %00000000, %00010100, %00000000
+            dc.b %00000000, %00000100, %00000000
+            dc.b %00000000, %00010101, %00000000
+            dc.b %10100000, %11010101, %10000000
+            dc.b %10100000, %10010101, %10000000
+            dc.b %01000000, %00101010, %00000000
+            dc.b %10100000, %10010101, %10000000
+            dc.b %10100000, %11010101, %10000000
+            dc.b %11000000, %10101010, %10000000
+
+            ; dc.b %00000000, %01111111, %00000000
+            ; dc.b %01000000, %01000001, %00000001
+            ; dc.b %01100000, %00011100, %00000011
+            ; dc.b %01100000, %00111110, %00000011
+            ; dc.b %01100000, %00111110, %00000011
+            ; dc.b %01100000, %00111110, %00000011
+            ; dc.b %01100000, %00011100, %00000011
+            ; dc.b %01000000, %01000001, %00000001
+            ; dc.b %00000000, %01111111, %00000000
 
             assume grid_height=10
             assume block_height=20
