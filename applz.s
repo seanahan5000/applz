@@ -31,10 +31,12 @@ grid_height     = 10    ; includes bottom dead space
 grid_size       = grid_width * grid_height
 grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
 
+max_aim_dotz    = 32
+
 wave_x          = 31    ; in bytes
 wave_y          = 20
 
-throttle_ballz = 16     ; under this ball count, add delay
+throttle_ballz  = 16    ; under this ball count, add delay
 
 send_delay      = 8
 
@@ -52,12 +54,14 @@ texth         = $05
 text_index    = $06
 text_length   = $07
 
-; $10
+difficulty    = $10
 applz_visible = $11     ; applz visible on screen (<= appl_slots)
 appl_slots    = $12     ; slots used in tables, both visible and complete
 
 appl_index    = $13
+
 dot_count     = $14
+dot_repeat    = $15
 
 angle         = $16
 angle_dx_frac = $17
@@ -132,9 +136,9 @@ PREAD       = $FB1E
 
 ; TODO:
 ;   - improved block emptying
+;   - green/purple vs orange/blue blocks
 ;   - real scoring/high score
-;   - orange/blue blocks
-;   - remove aiming ricochet
+;   - difficulty setting
 ;   - keyboard aiming support?
 ;   - sound + disable toggle UI
 
@@ -147,6 +151,9 @@ start
             sta seed0
             lda #$34
             sta seed1
+
+            lda #0
+            sta difficulty
 
             jsr clear1
             jsr erase_screen_grid
@@ -361,8 +368,6 @@ game_over   subroutine
 
 aiming_mode subroutine
 
-            lda #16         ;*** dot count
-            sta dot_count
             lda #0
             sta appl_index
 
@@ -588,8 +593,11 @@ draw_applz_ready
 
 draw_dotz   subroutine
 
+            lda #0
+            sta dot_count
+
             ldx #1
-.1          stx appl_index
+.loop1      stx appl_index
 
             ; copy dx and dy from previous dot
 
@@ -613,47 +621,9 @@ draw_dotz   subroutine
             lda dy_int-1,x
             sta dy_int,x
 
-            ; apply dx and dy multiple times
-
-            lda #4
-            sta grid_col            ;***
-            ldx appl_index
-.2          jsr update_dot
-            dec grid_col
-            bne .2
-
-            jsr eor_dot
-
-            ldx appl_index
-            inx
-            cpx dot_count
-            bne .1
-            rts
-
-
-erase_dotz  subroutine
-
-            ldx #1
-.1          stx appl_index
-            jsr eor_dot
-            ldx appl_index
-            inx
-            cpx dot_count
-            bne .1
-            rts
-
-;---------------------------------------
-;
-; update single dot position
-;
-; on entry:
-;   x: appl_index
-;
-; on exit:
-;   x: appl_index
-;
-update_dot  subroutine
-
+            lda #4              ; 4 delta steps between dots
+            sta dot_repeat
+.loop2
             lda x_frac,x
             clc
             adc dx_frac,x
@@ -662,13 +632,16 @@ update_dot  subroutine
             adc dx_int,x
             sta x_int,x
 
-            ;*** get rid of ricochet
+            ; check for dot reaching left or right edge of grid
+
             cmp #21
-            bcc .1
+            bcc .3
             cmp #grid_screen_width - 21 - ball_width
-            bcc .2
-.1          jsr reflect_x
-.2
+            bcc .4
+.3          lda difficulty
+            bne .exit
+            jsr reflect_x
+.4
             lda y_frac,x
             clc
             adc dy_frac,x
@@ -676,6 +649,35 @@ update_dot  subroutine
             lda y_int,x
             adc dy_int,x
             sta y_int,x
+
+            ; check for hitting top of grid
+
+            cmp #192-ball_height
+            bcs .exit
+
+            dec dot_repeat
+            bne .loop2
+
+            jsr eor_dot
+
+            ldx appl_index
+            inx
+            stx dot_count
+            cpx #max_aim_dotz
+            bne .loop1
+.exit       rts
+
+
+erase_dotz  subroutine
+
+            ldx #1
+            bne .2          ; always
+.1          stx appl_index
+            jsr eor_dot
+            ldx appl_index
+            inx
+.2          cpx dot_count
+            bcc .1
             rts
 
 ;---------------------------------------
@@ -1695,16 +1697,6 @@ block_appl_shape
             dc.b %10100000, %11010101, %10000000
             dc.b %11000000, %10101010, %10000000
 
-            ; dc.b %00000000, %01111111, %00000000
-            ; dc.b %01000000, %01000001, %00000001
-            ; dc.b %01100000, %00011100, %00000011
-            ; dc.b %01100000, %00111110, %00000011
-            ; dc.b %01100000, %00111110, %00000011
-            ; dc.b %01100000, %00111110, %00000011
-            ; dc.b %01100000, %00011100, %00000011
-            ; dc.b %01000000, %01000001, %00000001
-            ; dc.b %00000000, %01111111, %00000000
-
             assume grid_height=10
             assume block_height=20
             assume grid_screen_top=0
@@ -1795,6 +1787,7 @@ move_appl   subroutine
             bcc move_appl_ul        ; 3 always
 
 ; TODO: this may eventually call back into main appl update look
+; TODO: if not, make callers jump directly to hit_block
 hit_no_move jmp hit_block
 
 ; eor move:
