@@ -29,7 +29,7 @@ grid_screen_top = 0     ; assumed implicitly
 grid_width      = 9     ; includes left and right padding
 grid_height     = 10    ; includes bottom dead space
 grid_size       = grid_width * grid_height
-grid_screen_width = grid_width * 3 * 7  ;***  only used by dotz
+grid_screen_width = grid_width * 3 * 7
 
 max_aim_dotz    = 32
 
@@ -42,7 +42,8 @@ send_delay      = 8
 
 scroll_delta    = 4     ; number of lines stepped per grid scroll
 
-start_y         = 192 - ball_height
+default_start_x = 72
+default_start_y = 192 - ball_height
 
 temp          = $00
 xpos          = $01
@@ -136,6 +137,7 @@ PREAD       = $FB1E
 
 ; TODO:
 ;   - improved block emptying
+;   - block counts > 255
 ;   - green/purple vs orange/blue blocks
 ;   - real scoring/high score
 ;   - difficulty setting
@@ -152,7 +154,7 @@ start
             lda #$34
             sta seed1
 
-            lda #0
+            lda #1
             sta difficulty
 
             jsr clear1
@@ -183,10 +185,10 @@ restart     jsr clear_grid
             lda #0
             sta wave_bcd1
 
-            lda #72         ; TODO: use a constant
+            lda #default_start_x
             sta start_x
 
-            jmp first_wave_mode
+            bne first_wave_mode ; always
 
 wave_str    dc.b 5,"WAVE:"
 
@@ -197,38 +199,40 @@ clear_grid  subroutine
             lda #grid_height
             sta grid_row
             ldy #0
-.1          lda #block_type_edge
+.loop1      lda #block_type_edge
             sta block_grid,y
             sta block_grid+grid_width-1,y
             iny
             lda #0
             ldx #grid_width-2
-.2          sta block_grid,y
+.loop2      sta block_grid,y
             sta block_counts,y
             iny
             dex
-            bne .2
+            bne .loop2
             iny
             dec grid_row
-            bne .1
+            bne .loop1
             rts
-
+;
+; scroll down grid block and block count tables
+;
 scroll_blocks subroutine
 
             ldy #grid_size-grid_width-1
-.1          lda block_grid,y
+.loop1      lda block_grid,y
             sta block_grid+grid_width,y
             lda block_counts,y
             sta block_counts+grid_width,y
             dey
-            bpl .1
+            bpl .loop1
 
             ldy #grid_width-2
             lda #0
-.2          sta block_grid,y
+.loop2      sta block_grid,y
             sta block_counts,y
             dey
-            bne .2
+            bne .loop2
             rts
 
 ;=======================================
@@ -242,7 +246,7 @@ next_wave_mode subroutine
             inx
             sed
             lda wave_bcd0
-        ;   clc
+;           clc
             adc #1
             sta wave_bcd0
             lda wave_bcd1
@@ -300,7 +304,7 @@ first_wave_mode subroutine
             bcc .4
             lda #255                ; clamp counter to maximum value
 .4          sta block_counts,y
-            lda #block_type_gv      ; TODO: pick block_type_ob
+            lda #block_type_ob      ; TODO: pick block_type_gv
             sta block_grid,y
             dec block_index
             bne .2
@@ -349,8 +353,9 @@ game_over   subroutine
 
             ; TODO: put up "game over" graphic
 
-            ; make sure button has been seen as up,
-            ;   then wait for it to go down again before restarting
+            ; wait for a button press to end game and start a new one
+            ; (make sure button has been seen as up, then wait for it to
+            ;   go down again before restarting)
 
 .1          bit pbutton0
             bmi .1
@@ -382,7 +387,7 @@ aiming_mode subroutine
             sta y_frac
             ldx start_x
             stx x_int
-            lda #start_y
+            lda #default_start_y
             sta y_int
             jsr eor_appl        ; draw aiming ball
 
@@ -503,7 +508,7 @@ running_mode subroutine
 
             lda start_x         ; set start position
             sta x_int,x
-            lda #start_y
+            lda #default_start_y
             sta y_int,x
             lda #0
             sta x_frac,x
@@ -541,12 +546,12 @@ running_mode subroutine
             lda y_int,y
             jsr eor_appl
             jmp .loop1
-
+;
 ; set and convert applz_ready to BCD
 ;
 ; on entry:
 ;   a: applz_ready value
-
+;
 set_applz_ready subroutine
 
             sta applz_ready
@@ -588,9 +593,10 @@ draw_applz_ready
             jsr draw_number
             lda applz_ready_bcd0
             jmp draw_number
-
-;---------------------------------------
-
+;
+; draw new aiming dotz until edge of screen is hit
+;   (or richochet if difficulty == 0)
+;
 draw_dotz   subroutine
 
             lda #0
@@ -623,8 +629,8 @@ draw_dotz   subroutine
 
             lda #4              ; 4 delta steps between dots
             sta dot_repeat
-.loop2
-            lda x_frac,x
+
+.loop2      lda x_frac,x
             clc
             adc dx_frac,x
             sta x_frac,x
@@ -636,7 +642,7 @@ draw_dotz   subroutine
 
             cmp #21
             bcc .3
-            cmp #grid_screen_width - 21 - ball_width
+            cmp #grid_screen_width-21-ball_width
             bcc .4
 .3          lda difficulty
             bne .exit
@@ -666,8 +672,9 @@ draw_dotz   subroutine
             cpx #max_aim_dotz
             bne .loop1
 .exit       rts
-
-
+;
+; erase all previously drawn aiming dotz
+;
 erase_dotz  subroutine
 
             ldx #1
@@ -679,11 +686,9 @@ erase_dotz  subroutine
 .2          cpx dot_count
             bcc .1
             rts
-
-;---------------------------------------
 ;
 ; remove ball off bottom of screen
-
+;
 ball_done   subroutine
 
             ldx ball_x
@@ -731,17 +736,17 @@ ball_done   subroutine
 
 wave_done   subroutine
 
-            lda x_int,x         ; use final x for start/aim x
-            cmp #block_width    ;   clamped to reasonable values
+            ; use final x for start/aim x clamped to reasonable values
+
+            lda x_int,x
+            cmp #block_width
             bcs .1
             lda #block_width
-.1          cmp #162
+.1          cmp #grid_screen_width-21-ball_width-1
             bcc .2
-            lda #162            ; grid_screen_width - 21 - ball_width - 1
+            lda #grid_screen_width-21-ball_width-1
 .2          sta start_x
             rts
-
-;---------------------------------------
 ;
 ; update single appl position
 ;
@@ -754,69 +759,68 @@ wave_done   subroutine
 ; NOTE: Reflection code is optimized for fall through path
 ;   where all blocks are empty, since this is common case.
 ;
-
 update_appl subroutine
 
-            lda x_frac,x                                ; 4
-            clc                                         ; 2
-            adc dx_frac,x                               ; 4
-            sta x_frac,x                                ; 4
-            lda x_int,x                                 ; 4
-            sta ball_x                                  ; 3
-            adc dx_int,x                                ; 4
-            sta x_int,x                                 ; 4
-            sta ball_dx                                 ; 3
-            tay                                         ; 2
+            lda x_frac,x                        ; 4
+            clc                                 ; 2
+            adc dx_frac,x                       ; 4
+            sta x_frac,x                        ; 4
+            lda x_int,x                         ; 4
+            sta ball_x                          ; 3
+            adc dx_int,x                        ; 4
+            sta x_int,x                         ; 4
+            sta ball_dx                         ; 3
+            tay                                 ; 2
 
-            lda grid_x_table + 1,y                      ; 4
-            sta grid_left                               ; 3
-            sec                                         ; 2
-            sbc grid_x_table + 1 + ball_width - 1,y     ; 4
-            sta grid_dx                                 ; 3
+            lda grid_x_table+block_gap,y        ; 4
+            sta grid_left                       ; 3
+            sec                                 ; 2
+            sbc grid_x_table+ball_width-1,y     ; 4
+            sta grid_dx                         ; 3
 
-            lda y_frac,x                                ; 4
-            clc                                         ; 2
-            adc dy_frac,x                               ; 4
-            sta y_frac,x                                ; 4
-            lda y_int,x                                 ; 4
-            sta ball_y                                  ; 3
-            adc dy_int,x                                ; 4
-            sta y_int,x                                 ; 4
+            lda y_frac,x                        ; 4
+            clc                                 ; 2
+            adc dy_frac,x                       ; 4
+            sta y_frac,x                        ; 4
+            lda y_int,x                         ; 4
+            sta ball_y                          ; 3
+            adc dy_int,x                        ; 4
+            sta y_int,x                         ; 4
 
-            cmp #192-ball_height                        ; 2     ; check for ball y wrapping
-            bcs .reverse_dy                             ; 2
+            cmp #192-ball_height                ; 2 ; check for ball y wrapping
+            bcs .reverse_dy                     ; 2
 
 .post_reverse_d7
-            sta ball_dy                                 ; 3
-            tay                                         ; 2
+            sta ball_dy                         ; 3
+            tay                                 ; 2
 
-            lda grid_y_table + block_gap,y              ; 4
-            sta grid_top                                ; 3
-            cmp grid_y_table + ball_height - 1,y        ; 4
-            bne up_down                                 ; 2     ; crossed horizontal block edge
-            clc                                         ; 2
-            adc grid_left                               ; 3
-            tay                                         ; 2
-            lda grid_dx                                 ; 3
-            bne left_right_y1                           ; 2     ; crossed vertical block edge
+            lda grid_y_table+block_gap,y        ; 4
+            sta grid_top                        ; 3
+            cmp grid_y_table+ball_height-1,y    ; 4
+            bne up_down                         ; 2 ; crossed horizontal block edge
+            clc                                 ; 2
+            adc grid_left                       ; 3
+            tay                                 ; 2
+            lda grid_dx                         ; 3
+            bne left_right_y1                   ; 2 ; crossed vertical block edge
 
-            lda block_grid,y                            ; 4
-            bne collide_appl                            ; 2/3
+            lda block_grid,y                    ; 4
+            bne collide_appl                    ; 2/3
 
-            jmp move_appl                               ; 4     ; TODO: get rid of
-                                                        ; = 123
+            jmp move_appl                       ; 4 ; TODO: get rid of
+                                                ; = 123
 ; reflect ball at top of screen
 
 .reverse_dy cmp #192+ball_height+1
             bcc .ball_done
             jsr reflect_y
+            lda y_int,x
             jmp .post_reverse_d7
 .ball_done  jmp ball_done
-
+;
 ; check for collision with appl block
-
+;
 collide_appl
-            ; TODO: check for exact collision?
             ldx appl_count
             inx
             beq .1              ; clamp to 255
@@ -826,7 +830,6 @@ collide_appl
             jsr eor_block_appl
             ldx appl_index      ; restore ball index
             jmp move_appl
-
 ;
 ; ball moving vertically crossed horizontal edge on single block
 ;
@@ -859,7 +862,6 @@ up_down_x1  lda grid_left
             tay
 .bounce_dy  jsr reflect_y
             jmp hit_move_appl   ; TODO: get rid of
-
 ;
 ; ball moving horizontally crossed vertical edge on single block
 ;
@@ -954,7 +956,6 @@ diag_up_right subroutine
             adc #grid_width+1
             tay
             jmp hit_no_move
-
 ;
 ;   a      b       c     d      e      f      g
 ; +-+      +-+                +-+-+  +-+    ..+-+
@@ -1093,7 +1094,6 @@ diag_down_right subroutine
             adc #grid_width-1
             tay
             jmp hit_no_move
-
 ;
 ;   a      b       c     d      e      f      g
 ; +-+                                +-+    +-+
@@ -1163,7 +1163,6 @@ diag_down_left subroutine
             adc #grid_width+1
             tay
             jmp hit_no_move
-
 ;
 ; reflect x/y,dx/dy without altering block counts
 ;
@@ -1175,7 +1174,6 @@ diag_down_left subroutine
 ;   x: ball index
 ;   y: block index
 ;
-
 reflect_x   lda x_frac,x        ; back up to old x
             sec
             sbc dx_frac,x
@@ -1216,13 +1214,9 @@ reflect_y   lda y_frac,x        ; back up to old y
             eor #$ff
             adc #0
             sta dy_int,x
-
-            ;*** caller assumes ball_dy in A
-            lda ball_dy
             rts
-
 ;
-; handle hitting block
+; handle hitting a grid block
 ;
 ; on entry:
 ;   x: ball index
@@ -1287,8 +1281,6 @@ grid_y_table
             ds  block_height,9*grid_width
             ds  block_height,10*grid_width
             ;*** 0*9 instead? ***
-
-;---------------------------------------
 ;
 ; scroll all visible grid blocks down by one on screen
 ;
@@ -1296,8 +1288,8 @@ scroll_screen_grid subroutine
 
             lda #block_height/scroll_delta
             sta grid_row
-.1          ldx #191
-.2          lda hires_table_lo-scroll_delta,x
+.loop1      ldx #191
+.loop2      lda hires_table_lo-scroll_delta,x
             clc
             adc #grid_screen_left+3
             sta .mod1+1
@@ -1305,7 +1297,7 @@ scroll_screen_grid subroutine
             sta .mod1+2
 
             lda hires_table_lo,x
-        ;   clc
+;           clc
             adc #grid_screen_left+3
             sta .mod2+1
             lda hires_table_hi,x
@@ -1319,9 +1311,9 @@ scroll_screen_grid subroutine
 
             dex
             cpx #scroll_delta-1
-            bne .2
+            bne .loop2
 
-.3          lda hires_table_lo,x
+.loop3      lda hires_table_lo,x
             clc
             adc #grid_screen_left+3
             sta .mod3+1
@@ -1333,16 +1325,18 @@ scroll_screen_grid subroutine
             dey
             bpl .mod3
             dex
-            bpl .3
+            bpl .loop3
 
             dec grid_row
-            bne .1
+            bne .loop1
             rts
-
+;
+; erase the entire screen grid area and draw side bars
+;
 erase_screen_grid subroutine
 
             ldx #0
-.1          lda hires_table_lo,x
+.loop1      lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1357,10 +1351,10 @@ erase_screen_grid subroutine
             ; clear main grid
 
             lda #0
-.2          sta (screenl),y
+.loop2      sta (screenl),y
             iny
             cpy #grid_width*3-3+grid_screen_left
-            bne .2
+            bne .loop2
 
             ; draw bar on right of grid
 
@@ -1369,10 +1363,10 @@ erase_screen_grid subroutine
 
             inx
             cpx #192
-            bne .1
+            bne .loop1
             rts
-
-;---------------------------------------
+;
+; update aiming angle delta values
 ;
 ; entry
 ;   a: angle 0 (full left) to 255 (full right)
@@ -1429,9 +1423,8 @@ update_angle subroutine
             rol
             sta angle_dy_int
             rts
-
 ;
-; 128 sine values from [0, PI / 2)
+; table of 128 sine values from [0, PI / 2)
 ;
 ;   for (uint32_t i = 0; i < 128; ++i)
 ;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
@@ -1452,7 +1445,8 @@ sine_table  hex 000306090c0f1215
             hex f4f5f6f7f8f9f9fa
             hex fbfbfcfcfdfdfefe
             hex feffffffffffffff
-
+;
+; draw a single grid block
 ;
 ; on entry
 ;   y: grid index of block
@@ -1463,10 +1457,11 @@ sine_table  hex 000306090c0f1215
 draw_block  subroutine
 
             ; choose color based on block type
+
             ldx #$d5
-;           cmp #block_type_ob
-;           beq .1
-;           ldx #$55
+            cmp #block_type_ob
+            beq .1
+            ldx #$55
 .1          stx block_color
 
             lda grid_screen_rows,y
@@ -1488,7 +1483,7 @@ draw_block  subroutine
             lda grid_screen_cols,y
             tay
 
-            ; first line
+            ; draw first line
 
             lda hires_table_lo,x
             sta screenl
@@ -1507,11 +1502,11 @@ draw_block  subroutine
             sta (screenl),y
             dey
             dey
-            bpl .5              ; always
+            bpl .4              ; always
 
             ; draw empty box lines
 
-.4          lda hires_table_lo,x
+.loop1      lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1530,14 +1525,14 @@ draw_block  subroutine
             sta (screenl),y
             dey
             dey
-.5          inx
+.4          inx
             cpx block_mid
-            bne .4
-            beq .7              ; always
+            bne .loop1
+            beq .5              ; always
 
             ; draw full box lines
 
-.6          lda hires_table_lo,x
+.loop2      lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1555,10 +1550,10 @@ draw_block  subroutine
             dey
             dey
             inx
-.7          cpx block_bot
-            bne .6
+.5          cpx block_bot
+            bne .loop2
 
-            ; last line
+            ; draw last line
 
             lda hires_table_lo,x
             sta screenl
@@ -1575,25 +1570,9 @@ draw_block  subroutine
             and #$60            ; clip out block gap
             eor block_color
             sta (screenl),y
-
             rts
-
-
-            ; block pattern, reversed
-            ; TODO: use this?
-
-            dc.b %01010101, %00101010, %00010101     ; filled line (8/8)
-            dc.b %01010001, %00101010, %00010101     ;             (7/8)
-            dc.b %01000001, %00101010, %00010101     ;             (6/8)
-            dc.b %00000001, %00101010, %00010101     ;             (5/8)
-
-            dc.b %00000001, %00101000, %00010101     ;             (4/8)
-            dc.b %00000001, %00100000, %00010101     ;             (3/8)
-            dc.b %00000001, %00000000, %00010101     ;             (2/8)
-
-            dc.b %00000001, %00000000, %00010100     ;             (1/8)
-            dc.b %00000001, %00000000, %00010000     ; empty line  (0/8)
-
+;
+; erase a single grid block
 ;
 ; on entry
 ;   y: grid index of block
@@ -1607,7 +1586,7 @@ erase_block subroutine
             sta block_bot
             lda grid_screen_cols,y
             tay
-.1          lda hires_table_lo,x
+.loop       lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1617,15 +1596,16 @@ erase_block subroutine
             sta (screenl),y
             iny
             lda (screenl),y
-            and #$60
+            and #$60            ; clip out block gap
             sta (screenl),y
             dey
             dey
             inx
             cpx block_bot
-            bne .1
+            bne .loop
             rts
-
+;
+; draw an in-grid appl shape
 ;
 ; on entry
 ;   y: grid index of block
@@ -1645,7 +1625,7 @@ block_appl_height = 9
             lda grid_screen_cols,y
             sta block_left
 ;           clc
-            adc #block_width / 7
+            adc #block_width/7
             sta block_mid
 
             ; choose shifted or non-shifted shape based on column
@@ -1653,16 +1633,16 @@ block_appl_height = 9
             ldx #0
             lda block_left
             lsr
-            bcs .1
-            ldx #block_appl_height*(block_width / 7)
-.1
+            bcs .noshift
+            ldx #block_appl_height*(block_width/7)
+.noshift
             ldy block_top
 .loop1      lda hires_table_lo,y
             sta screenl
             lda hires_table_hi,y
             sta screenh
             ldy block_left
-.loop2      lda block_appl_shape,x
+.loop2      lda block_appl_shapes,x
             eor (screenl),y
             sta (screenl),y
             inx
@@ -1676,7 +1656,7 @@ block_appl_height = 9
             bne .loop1
             rts
 
-block_appl_shape
+block_appl_shapes
             dc.b %00000000, %00101000, %00000000
             dc.b %00000000, %00001000, %00000000
             dc.b %00000000, %00101010, %00000000
@@ -1728,7 +1708,7 @@ grid_screen_cols
             dc.b 6,9,12,15,18,21,24,27,30
             dc.b 6,9,12,15,18,21,24,27,30
 ;
-; eor the dot shape
+; eor a single aiming dot shape
 ;
 eor_dot     subroutine
 
@@ -1744,7 +1724,7 @@ eor_dot     subroutine
             sta ycount
             ldy mod7,x
             ldx dotz_lo,y
-.1          ldy ypos
+.loop       ldy ypos
             lda hires_table_lo,y
             sta screenl
             lda hires_table_hi,y
@@ -1756,13 +1736,13 @@ eor_dot     subroutine
             inx
             iny
             lda dot0,x
-            beq .2
+            beq .skip0
             eor (screenl),y
             sta (screenl),y
-.2          inx
+.skip0      inx
             inc ypos
             dec ycount
-            bne .1
+            bne .loop
             rts
 
 ;-------------------------------------------------------------------------------
@@ -1814,7 +1794,7 @@ move_appl_ul subroutine
             sbc ball_dx             ; 3
             asl                     ; 2
             asl                     ; 2
-        ;   clc
+;           clc
             adc ball_y              ; 3
             sec                     ; 2
             sbc ball_dy             ; 3
@@ -1828,18 +1808,18 @@ move_appl_ul subroutine
             tax                     ; 2
 
             lda ball_dy             ; 3     y/dy
-        ;   clc
+;           clc
             adc appl_heights,y      ; 4
             sta ycount              ; 3
 
             ldy ball_dx             ; 3     x/dx
             lda div7,y              ; 4
-        ;   clc
+;           clc
             adc #grid_screen_left   ; 2
             sta ball_x              ; 3
 
             txa                     ; 2
-        ;   clc
+;           clc
             adc mod7,y              ; 4
             tax                     ; 2
 
@@ -1892,13 +1872,13 @@ move_appl_ur subroutine
             sbc ball_x              ; 3
             asl                     ; 2
             asl                     ; 2
-        ;   clc
+;           clc
             adc ball_y              ; 3
             sec                     ; 2
             sbc ball_dy             ; 3
             beq .exit               ; 2/3
             asl                     ; 2
-        ;   clc
+;           clc
             adc #1                  ; 3
 
             tay                     ; 2
@@ -1908,18 +1888,18 @@ move_appl_ur subroutine
             tax                     ; 2
 
             lda ball_dy             ; 3     y/dy
-        ;   clc
+;           clc
             adc appl_heights,y      ; 4
             sta ycount              ; 3
 
             ldy ball_x              ; 3     x/dx
             lda div7,y              ; 4
-        ;   clc
+;           clc
             adc #grid_screen_left   ; 2
             sta ball_x              ; 3
 
             txa                     ; 2
-        ;   clc
+;           clc
             adc mod7,y              ; 4
             tax                     ; 2
 
@@ -1978,13 +1958,13 @@ move_appl_dl subroutine
             sbc ball_dx             ; 3
             asl                     ; 2
             asl                     ; 2
-        ;   clc
+;           clc
             adc ball_dy             ; 3
             sec                     ; 2
             sbc ball_y              ; 3
             beq .exit               ; 2/3   no movement
             asl                     ; 2
-        ;   clc
+;           clc
             adc #1                  ; 3     + ur_dl
 
             tay                     ; 2
@@ -1994,18 +1974,18 @@ move_appl_dl subroutine
             tax                     ; 2
 
             lda ball_y              ; 3     y/dy
-        ;   clc
+;           clc
             adc appl_heights,y      ; 4
             sta ycount              ; 3
 
             ldy ball_dx             ; 3     x/dx
             lda div7,y              ; 4
-        ;   clc
+;           clc
             adc #grid_screen_left   ; 2
             sta ball_x              ; 3
 
             txa                     ; 2
-        ;   clc
+;           clc
             adc mod7,y              ; 4
             tax                     ; 2
 
@@ -2058,7 +2038,7 @@ move_appl_dr subroutine
             sbc ball_x              ; 3
             asl                     ; 2
             asl                     ; 2
-        ;   clc
+;           clc
             adc ball_dy             ; 3
             sec                     ; 2
             sbc ball_y              ; 3
@@ -2072,18 +2052,18 @@ move_appl_dr subroutine
             tax                     ; 2
 
             lda ball_y              ; 3     y/dy
-        ;   clc
+;           clc
             adc appl_heights,y      ; 4
             sta ycount              ; 3
 
             ldy ball_x              ; 3     x/dx
             lda div7,y              ; 4
-        ;   clc
+;           clc
             adc #grid_screen_left   ; 2
             sta ball_x              ; 3
 
             txa                     ; 2
-        ;   clc
+;           clc
             adc mod7,y              ; 4
             tax                     ; 2
 
@@ -2124,7 +2104,8 @@ move_appl_dr subroutine
 
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
-
+;
+; eor a ball shape without movement
 ;
 ; on entry:
 ;   X: x coordinate
@@ -2138,7 +2119,7 @@ eor_appl    subroutine
             sta ycount
 
             lda div7,x
-        ;   clc
+;           clc
             adc #grid_screen_left
             sta ball_x
 
@@ -2178,12 +2159,12 @@ eor_appl    subroutine
 
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
-
+;
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
 ;   Assumes seed0 and seed1 zpage values have been initialized.
 ;   35 bytes, 69 cycles
-
+;
 random      lda seed1
             tay
             lsr
@@ -2208,7 +2189,6 @@ random      lda seed1
             eor seed0
             sta seed0
             rts
-
 ;
 ; clear primary screen to black
 ;
@@ -2216,7 +2196,7 @@ clear1      subroutine
 
             ldx #0
             txa
-.1          sta $2000,x
+.loop       sta $2000,x
             sta $2100,x
             sta $2200,x
             sta $2300,x
@@ -2249,7 +2229,7 @@ clear1      subroutine
             sta $3e00,x
             sta $3f00,x
             inx
-            bne .1
+            bne .loop
             rts
 
 dotz_lo     dc.b #<dot0
@@ -2428,4 +2408,3 @@ hires_table_hi
 
             include applz.data.s
             include text.s
-
