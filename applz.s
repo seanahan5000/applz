@@ -11,6 +11,8 @@
                 endif
             endm
 
+; constants
+
 block_type_appl = $01
 block_type_edge = $80
 block_type_gv   = $81
@@ -19,17 +21,19 @@ block_type_ob   = $82
 block_width     = 21   ; including gap
 block_height    = 20   ; including gap
 block_gap       = 2
+block_height_nogap = block_height-block_gap
 
 ball_width      = 5
 ball_height     = 5
 dot_height      = 3
 
 grid_screen_left = 6    ; in bytes
-grid_screen_top = 0     ; assumed implicitly
+grid_screen_top = 4     ; implicit dependencies
 grid_width      = 9     ; includes left and right padding
 grid_height     = 10    ; includes bottom dead space
 grid_size       = grid_width * grid_height
 grid_screen_width = grid_width * 3 * 7
+grid_border_height = 2
 
 max_aim_dotz    = 32
 
@@ -43,105 +47,115 @@ send_delay      = 8
 scroll_delta    = 4     ; number of lines stepped per grid scroll
 
 default_start_x = 72
-default_start_y = 192 - ball_height
+default_start_y = 192 - ball_height - 8     ; TODO: move down?
 
-temp          = $00
-xpos          = $01
-ypos          = $02
-ycount        = $03
+min_angle       = 2
+max_angle       = 253
 
-textl         = $04
-texth         = $05
-text_index    = $06
-text_length   = $07
+; zero page variables
 
-difficulty    = $10
-applz_visible = $11     ; applz visible on screen (<= appl_slots)
-appl_slots    = $12     ; slots used in tables, both visible and complete
+temp            = $00
+xpos            = $01
+ypos            = $02
+ycount          = $03
 
-appl_index    = $13
+textl           = $04
+texth           = $05
+text_index      = $06
+text_length     = $07
 
-dot_count     = $14
-dot_repeat    = $15
+input_mode      = $10   ; 0: keyboard, 1: paddle
+difficulty      = $11
+applz_visible   = $12   ; applz visible on screen (<= appl_slots)
+appl_slots      = $13   ; slots used in tables, both visible and complete
 
-angle         = $16
-angle_dx_frac = $17
-angle_dx_int  = $18
-angle_dy_frac = $19
-angle_dy_int  = $1a
-button_up     = $1b     ; saw button up between unthrottle mode and aiming
+appl_index      = $14
 
-start_x       = $1c     ; variable position relative to grid edge
-send_countdown = $1d
+dot_count       = $15
+dot_repeat      = $16
 
-appl_count  = $1f       ; total number of applz the player has collected
+angle           = $17
+angle_dx_frac   = $18
+angle_dx_int    = $19
+angle_dy_frac   = $1a
+angle_dy_int    = $1b
+button_up       = $1c   ; saw button up between unthrottle mode and aiming
 
-screenl     = $20
-screenh     = $21
-seed0       = $22
-seed1       = $23
+start_x         = $1d   ; variable position relative to grid edge
+send_countdown  = $1e
 
-grid_left   = $30
-grid_dx     = $31
-grid_top    = $32
-grid_col    = $33
-grid_row    = $34
+appl_count      = $1f   ; total number of applz the player has collected
 
-block_index = $35
-block_type  = $36
-block_color = $37
-block_top   = $38
-block_left  = $39
-block_mid   = $3a
-block_bot   = $3b
+screenl         = $20
+screenh         = $21
+seed0           = $22
+seed1           = $23
 
-wave_index  = $40
-wave_bcd0   = $41
-wave_bcd1   = $42
+grid_left       = $30
+grid_dx         = $31
+grid_top        = $32
+grid_col        = $33
+grid_row        = $34
 
-applz_ready = $43       ; applz ready but not yet launched
-applz_ready_bcd0 = $44
-applz_ready_bcd1 = $45
+block_index     = $35
+block_type      = $36
+block_color     = $37
+block_top       = $38
+block_left      = $39
+block_mid       = $3a
+block_bot       = $3b
+
+wave_index      = $40
+wave_bcd0       = $41
+wave_bcd1       = $42
+wave_mag        = $43
+
+applz_ready     = $44   ; applz ready but not yet launched
+applz_ready_bcd0 = $45
+applz_ready_bcd1 = $46
 
 ; TODO: move these
-ball_x      = $48
-ball_dx     = $49
-ball_y      = $4a
-ball_dy     = $4b
+ball_x          = $49
+ball_dx         = $4a
+ball_y          = $4b
+ball_dy         = $4c
+max_ball_y      = $4d
 
-x_frac      = $1000
-x_int       = $1100
-dx_frac     = $1200
-dx_int      = $1300
-y_frac      = $1400
-y_int       = $1500
-dy_frac     = $1600
-dy_int      = $1700
+; buffer addresses
 
-block_grid   = $1800    ; grid_size bytes used
-block_counts = $1880    ; grid_size bytes used
+x_frac          = $1000
+x_int           = $1100
+dx_frac         = $1200
+dx_int          = $1300
+y_frac          = $1400
+y_int           = $1500
+dy_frac         = $1600
+dy_int          = $1700
+
+block_grid      = $1800 ; grid_size bytes used
+block_counts    = $1880 ; grid_size bytes used
 
 ; TODO: use correct abbreviations
-keyboard    = $C000
-unstrobe    = $C010
-click       = $C030
-graphics    = $C050
-text        = $C051
-fullscreen  = $C052
-primary     = $C054
-secondary   = $C055
-hires       = $C057
-pbutton0    = $C061
+keyboard        = $C000
+unstrobe        = $C010
+click           = $C030
+graphics        = $C050
+text            = $C051
+fullscreen      = $C052
+primary         = $C054
+secondary       = $C055
+hires           = $C057
+pbutton0        = $C061
 
-PREAD       = $FB1E
+PREAD           = $FB1E
 
 ; TODO:
-;   - improved block emptying
-;   - block counts > 255
+;   - clamp keyboard aiming on edge of screen
 ;   - green/purple vs orange/blue blocks
+;   - draw warning line at bottom of screen
+;   - block counts > 255
 ;   - real scoring/high score
 ;   - difficulty setting
-;   - keyboard aiming support?
 ;   - sound + disable toggle UI
 
             org $6000
@@ -153,6 +167,9 @@ start
             sta seed0
             lda #$34
             sta seed1
+
+            lda #1
+            sta input_mode          ; paddle mode by default
 
             lda #1
             sta difficulty
@@ -177,18 +194,17 @@ start
 restart     jsr clear_grid
             jsr erase_screen_grid
 
-            lda #1
-            sta wave_bcd0
-            sta wave_index
-            sta appl_count
-
-            lda #0
-            sta wave_bcd1
+            ldx #1
+            stx wave_bcd0
+            stx wave_index
+            stx appl_count
+            dex
+            stx wave_bcd1
+            stx wave_mag
 
             lda #default_start_x
             sta start_x
-
-            bne first_wave_mode ; always
+            jmp first_wave_mode
 
 wave_str    dc.b 5,"WAVE:"
 
@@ -234,6 +250,30 @@ scroll_blocks subroutine
             dey
             bne .loop2
             rts
+;
+; find the highest empty line and use that +1 to compute the line
+;   that balls complete at
+;
+compute_max_ball_y subroutine
+
+            ldy #grid_size-2
+.1          ldx #grid_width-2
+.2          lda block_grid,y
+            bne .3
+            dey
+            dex
+            bne .2
+            dey
+            dey
+            bpl .1
+.3          lda grid_screen_rows+grid_width,y
+            clc
+            adc #block_height
+            cmp #192-ball_height
+            bcc .4
+            lda #192-ball_height
+.4          sta max_ball_y
+            rts
 
 ;=======================================
 ; Wave mode
@@ -254,6 +294,21 @@ next_wave_mode subroutine
             sta wave_bcd1
             cld
 .1          stx wave_index
+
+            ; compute wave magnitude, used to scale block fill levels
+
+            txa
+            ldx #0
+            sec
+            sbc #1
+            lsr
+            lsr
+            lsr
+            beq .3
+.2          inx
+            lsr
+            bne .2
+.3          stx wave_mag
 
 first_wave_mode subroutine
 
@@ -277,14 +332,14 @@ first_wave_mode subroutine
             sta block_grid,y
             jsr eor_block_appl
 
-            ; get number of blocks to create, from 2 to 6
+            ; get number of blocks to create, from 2 to 7
 
 .1          jsr random
             tax
-            lda mod7,x
-            cmp #2
-            bcc .1
-            sta block_index
+            ldy mod7,x
+            beq .1
+            iny
+            sty block_index
 
             ; create new blocks on top row, allowing at most one block double-up
 
@@ -295,10 +350,10 @@ first_wave_mode subroutine
             lda block_grid,y
             cmp #block_type_appl    ; exclude block that already holds a new appl
             beq .2
-            lda block_counts,Y
+            lda block_counts,y
             beq .3
             cmp wave_index
-            bcs .2
+            bne .2
 .3          clc
             adc wave_index
             bcc .4
@@ -309,16 +364,18 @@ first_wave_mode subroutine
             dec block_index
             bne .2
 
-            ; draw new blocks on top row
+            ; draw new blocks on top row and existing blocks with new wave_mag
 
             ldy #1
-.5          lda block_grid,y
+.5          lda block_counts,y
+            beq .6
+            lda block_grid,y
             bpl .6
             sty block_index
             jsr draw_block
             ldy block_index
 .6          iny
-            cpy #grid_width-1
+            cpy #grid_size-grid_width-1
             bne .5
 
             ; erase any appl blocks before they scroll to bottom
@@ -338,11 +395,12 @@ first_wave_mode subroutine
 
             jsr scroll_blocks
             jsr scroll_screen_grid
+            jsr compute_max_ball_y
 
-            ; check for game over when blocks in bottom row are non-zero
+            ; check for game over when blocks in next-to bottom row are non-zero
 
             ldy #1
-.9          lda block_grid+grid_size-grid_width,y
+.9          lda block_grid+grid_size-grid_width*2,y
             bmi game_over
             iny
             cpy #grid_width-1
@@ -353,18 +411,43 @@ game_over   subroutine
 
             ; TODO: put up "game over" graphic
 
+            ldx input_mode
+            beq .2
+
             ; wait for a button press to end game and start a new one
             ; (make sure button has been seen as up, then wait for it to
             ;   go down again before restarting)
-
 .1          bit pbutton0
             bmi .1
-.2          bit pbutton0
+
+.2          lda keyboard
+            bpl .3
+            and #$7f
+            bit unstrobe
+            ldx #0
+            cmp #"K"
+            beq .new_mode
+            inx
+            cmp #"J"
+            beq .new_mode
+            ; ignore arrows so they don't trigger new game
+            cmp #$08            ; left arrow
+            beq .2
+            cmp #$15            ; right arrow
+            beq .2
+            ldx input_mode
+            beq .to_restart
+
+.new_mode   stx input_mode
+.3          lda input_mode
+            beq .2
+
+.joy_mode   bit pbutton0
             bpl .2
 
+.to_restart
             ; TODO: erase "game over" graphic
             ; TODO: erase old text?
-
             jmp restart
 
 ;=======================================
@@ -395,6 +478,7 @@ aiming_mode subroutine
             sta angle
             lda #0
             sta button_up
+            bit unstrobe
 
 .loop1      jsr update_angle
             lda angle_dx_frac
@@ -408,27 +492,67 @@ aiming_mode subroutine
 
             jsr draw_dotz
 
-.loop2      ldx #1
-            bit pbutton0        ; check for paddle 0 button press
+.loop2      lda keyboard
             bpl .1
+            and #$7f
+            bit unstrobe
+            ldx #0
+            cmp #"K"
+            beq .new_mode
+            inx
+            cmp #"J"
+            beq .new_mode
+            ldx input_mode
+            bne .joy_mode
+            cmp #$08            ; left arrow
+            beq .key_left
+            cmp #$15            ; right arrow
+            beq .key_right
+            cmp #" "
+            bne .1
+            jmp running_mode
+
+.new_mode   stx input_mode
+            txa
+            bne .joy_mode
+            ldy #$80
+            bne .common         ; always
+.1          ldx input_mode
+            beq .loop2
+.joy_mode   ldx #1
+            bit pbutton0        ; check for paddle 0 button press
+            bpl .2
             ldx button_up       ; must have seen button up once in case
             bne running_mode    ;   unthrottled mode was being used coming in
-.1          stx button_up
+.2          stx button_up
 
             ldx #0
             jsr PREAD           ; read paddle 0 value
-            cpy #2              ; clamp value to [2,253]
-            bcs .2              ;*** TODO: clamp a little more?
-            ldy #2
-.2          cpy #253
-            bcc .3
-            ldy #253
-.3          cpy angle
+            cpy #min_angle      ; clamp value to [2,253]
+            bcs .3
+            ldy #min_angle
+.3          cpy #max_angle
+            bcc .4
+            ldy #max_angle
+.4          cpy angle
             beq .loop2          ; loop until something changes
-            sty angle
+            bne .common         ; always
 
+.key_left   ldy angle
+            dey
+            cpy #min_angle
+            bcs .common
+            iny
+            bcc .common         ; always
+
+.key_right  ldy angle
+            iny
+            cpy #max_angle+1
+            bcc .common
+            dey
+
+.common     sty angle
             jsr erase_dotz
-
             jsr random          ; update random number on input change
             jmp .loop1
 
@@ -462,18 +586,41 @@ running_mode subroutine
             cpx appl_slots
             bne .loop2
 
+            lda keyboard
+            bpl .1
+            bit unstrobe
+            and #$7f
+            ldx #0
+            cmp #"K"
+            beq .new_mode
+            inx
+            cmp #"J"
+            beq .new_mode
+            ldx input_mode
+            bne .joy_mode
+            lda button_up
+            eor #1
+            sta button_up
+.new_mode   stx input_mode
+.1          ldx input_mode
+            beq .key_mode
+
             ; check for throttling ball movement speed
             ;   (must have seen button up once in case
             ;   unthrottled mode was being used coming in)
 
-            ldx button_up
-            bne .1
+.joy_mode   ldx button_up
+            bne .2
             bit pbutton0
             bmi .throttle
             ldx #1
             stx button_up
-.1          bit pbutton0
+.2          bit pbutton0
             bmi .nodelay
+            bpl .throttle       ; always
+
+.key_mode   lda button_up
+            bne .nodelay
 
             ; add delay for low ball counts
             ;   (~600 cycles per ball below throttle_ballz)
@@ -658,8 +805,8 @@ draw_dotz   subroutine
 
             ; check for hitting top of grid
 
-            cmp #192-ball_height
-            bcs .exit
+            cmp #grid_screen_top
+            bcc .exit
 
             dec dot_repeat
             bne .loop2
@@ -787,8 +934,10 @@ update_appl subroutine
             adc dy_int,x                        ; 4
             sta y_int,x                         ; 4
 
-            cmp #192-ball_height                ; 2 ; check for ball y wrapping
-            bcs .reverse_dy                     ; 2
+            cmp #grid_screen_top-2              ; 2
+            bcc .reverse_dy                     ; 2
+            cmp max_ball_y                      ; 3
+            bcs .ball_done                      ; 2
 
 .post_reverse_d7
             sta ball_dy                         ; 3
@@ -808,15 +957,17 @@ update_appl subroutine
             bne collide_appl                    ; 2/3
 
             jmp move_appl                       ; 4 ; TODO: get rid of
-                                                ; = 123
+                                                ; = 128
 ; reflect ball at top of screen
 
-.reverse_dy cmp #192+ball_height+1
-            bcc .ball_done
-            jsr reflect_y
+.reverse_dy jsr reflect_y
             lda y_int,x
             jmp .post_reverse_d7
-.ball_done  jmp ball_done
+
+.ball_done  cmp ball_y
+            bcc .post_reverse_d7                ; ball must be moving down to be done
+            beq .post_reverse_d7
+            jmp ball_done
 ;
 ; check for collision with appl block
 ;
@@ -1239,6 +1390,7 @@ hit_block   subroutine
             sta block_grid,y
             sty block_index
             jsr erase_block
+            jsr compute_max_ball_y
             ldx appl_index      ; restore ball index
             ldy block_index     ; restore block index
 .1          rts
@@ -1263,13 +1415,12 @@ grid_x_table
             ds  block_width,6
             ds  block_width,7
             ds  block_width,8
-            ;*** 0 instead? ***
 
 ; divide by 20 * grid_width table to convert y position into grid row offset
 ; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
             align 256
 grid_y_table
-            ds  block_height,0*grid_width
+            ds  block_height+grid_screen_top,0*grid_width
             ds  block_height,1*grid_width
             ds  block_height,2*grid_width
             ds  block_height,3*grid_width
@@ -1279,8 +1430,6 @@ grid_y_table
             ds  block_height,7*grid_width
             ds  block_height,8*grid_width
             ds  block_height,9*grid_width
-            ds  block_height,10*grid_width
-            ;*** 0*9 instead? ***
 ;
 ; scroll all visible grid blocks down by one on screen
 ;
@@ -1310,7 +1459,7 @@ scroll_screen_grid subroutine
             bpl .mod1
 
             dex
-            cpx #scroll_delta-1
+            cpx #grid_screen_top+scroll_delta-1
             bne .loop2
 
 .loop3      lda hires_table_lo,x
@@ -1325,7 +1474,8 @@ scroll_screen_grid subroutine
             dey
             bpl .mod3
             dex
-            bpl .loop3
+            cpx #grid_screen_top-1
+            bne .loop3
 
             dec grid_row
             bne .loop1
@@ -1336,25 +1486,37 @@ scroll_screen_grid subroutine
 erase_screen_grid subroutine
 
             ldx #0
-.loop1      lda hires_table_lo,x
+.1          lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
 
+            ldy #grid_screen_left+2
+            cpx #grid_border_height
+            bcs .2
+
+            ; draw filled bar on top/left of grid
+
+            lda #$f8
+            sta (screenl),y
+            iny
+
+            lda #$7f
+            bne .3              ; always
+
             ; draw bar on left of grid
 
-            ldy #grid_screen_left+2
-            lda #$18
+.2          lda #$18
             sta (screenl),y
             iny
 
             ; clear main grid
 
             lda #0
-.loop2      sta (screenl),y
+.3          sta (screenl),y
             iny
             cpy #grid_width*3-3+grid_screen_left
-            bne .loop2
+            bne .3
 
             ; draw bar on right of grid
 
@@ -1363,7 +1525,7 @@ erase_screen_grid subroutine
 
             inx
             cpx #192
-            bne .loop1
+            bne .1
             rts
 ;
 ; update aiming angle delta values
@@ -1452,125 +1614,185 @@ sine_table  hex 000306090c0f1215
 ;   y: grid index of block
 ;   a: block type
 ;
-; TODO: don't draw if block level doesn't change
-;
+wave_masks  dc.b 0, 1, 3, 7, 15, 31
+wave_shifts dc.b 0, 2, 1, 0, -1, -2
+
 draw_block  subroutine
 
-            ; choose color based on block type
-
-            ldx #$d5
-            cmp #block_type_ob
+            ldx #$00
+            lda block_counts,y
+            cmp #64     ;wave_index
+            bcc .1
             beq .1
-            ldx #$55
+            ldx #$80
 .1          stx block_color
 
-            lda grid_screen_rows,y
-            tax
-            clc
-            adc #block_height-block_gap-1
-            sta block_bot
+            ; TODO: base on wave_mag instead?
+;             ldx #$80
+;             cmp #block_type_ob
+;             beq .1
+;             ldx #$00
+; .1          stx block_color
 
-            lda #block_height-block_gap
+            ; compute number of top empty and bottom full lines in block
+
+            lda block_counts,y
             sec
-            sbc block_counts,y
-            beq .2
-            bcs .3
-.2          lda #1
-.3          clc
-            adc grid_screen_rows,y
-            sta block_mid
+            sbc #1
+            pha
+            ldx wave_mag
+            beq .3
+.2          lsr
+            dex
+            bne .2
+.3          sta block_bot
+            lda #block_height_nogap-2   ; minus top and bottom line
+            sec
+            sbc block_bot
+            bcs .4
+            lda #block_height_nogap-2   ; minus top and bottom line
+            sta block_bot
+            lda #0
+.4          sta block_top
 
+            ; compute number of dots in partial line based on wave magnitude
+
+            pla
+            ldx wave_mag
+            and wave_masks,x
+            sta block_mid
+            lda wave_shifts,x
+            tax
+            bpl .6
+.5          lsr block_mid
+            inx
+            bmi .5
+.6          lda block_mid
+.7          dex
+            bmi .8
+            asl
+            bcc .7             ; always
+.8          asl
+            asl
+            sta block_mid
+            beq .9
+            dec block_top
+.9
+
+draw_lines  ldx grid_screen_rows,y
             lda grid_screen_cols,y
             tay
 
-            ; draw first line
-
+            ; first full line
             lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
-            lda block_color
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            eor block_color
-            and #$60            ; clip out block gap
-            eor block_color
-            sta (screenl),y
-            dey
-            dey
-            bpl .4              ; always
-
-            ; draw empty box lines
-
-.loop1      lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            lda block_color
-            and #$83
-            sta (screenl),y
-            iny
-            and #$80
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            eor block_color
-            and #$60
-            eor block_color
-            and #$f8            ; clip out block gap
-            sta (screenl),y
-            dey
-            dey
-.4          inx
-            cpx block_mid
-            bne .loop1
-            beq .5              ; always
-
-            ; draw full box lines
-
-.loop2      lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            lda block_color
-            sta (screenl),y
-            iny
-            eor #$7f
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            eor block_color
-            and #$60            ; clip out block gap
-            eor block_color
-            sta (screenl),y
-            dey
-            dey
             inx
-.5          cpx block_bot
-            bne .loop2
+            lda #$55
+            ora block_color
+            sta (screenl),y
+            iny
+            lda #$2a
+            ora block_color
+            sta (screenl),y
+            iny
+            lda (screenl),y
+            and #$60
+            ora #$15
+            ora block_color
+            sta (screenl),y
+            dey
+            dey
 
-            ; draw last line
-
+            ; top empty lines
+            lda block_top
+            beq .11
+.10         lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            inx
+            lda #$01
+            ora block_color
+            sta (screenl),y
+            iny
+            lda block_color
+            sta (screenl),y
+            iny
+            lda (screenl),y
+            and #$60
+            ora #$10
+            ora block_color
+            sta (screenl),y
+            dey
+            dey
+            dec block_top
+            bne .10
+.11
+            ; partial line
+            lda block_mid
+            beq .12
             lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
-            lda block_color
+            inx
+            txa
+            pha
+            ldx block_mid
+            lda block_lines+0,x
+            ora block_color
             sta (screenl),y
             iny
-            eor #$7f
+            lda block_lines+1,x
+            ora block_color
             sta (screenl),y
             iny
             lda (screenl),y
-            eor block_color
-            and #$60            ; clip out block gap
-            eor block_color
+            and #$60
+            ora block_lines+2,x
+            ora block_color
             sta (screenl),y
+            dey
+            dey
+            pla
+            tax
+.12
+            ; bottom full lines
+.13         lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            inx
+            lda #$55
+            ora block_color
+            sta (screenl),y
+            iny
+            lda #$2a
+            ora block_color
+            sta (screenl),y
+            iny
+            lda (screenl),y
+            and #$60
+            ora #$15
+            ora block_color
+            sta (screenl),y
+            dey
+            dey
+            dec block_bot
+            bpl .13             ; draw bottom line by letting count go negative
             rts
+
+block_lines hex 01001000        ; 0 (empty)
+            hex 05001000        ; 1
+            hex 15001000        ; 2
+            hex 55001000        ; 3
+            hex 55021000        ; 4
+            hex 550a1000        ; 5
+            hex 552a1000        ; 6
+            hex 552a1100        ; 7
+            hex 552a1500        ; 8 (full)
 ;
 ; erase a single grid block
 ;
@@ -1582,7 +1804,7 @@ erase_block subroutine
             lda grid_screen_rows,y
             tax
             clc
-            adc #block_height-block_gap
+            adc #block_height_nogap
             sta block_bot
             lda grid_screen_cols,y
             tay
@@ -1616,7 +1838,7 @@ block_appl_height = 9
 
             lda grid_screen_rows,y
             clc
-            adc #(block_height-block_gap-block_appl_height)/2
+            adc #(block_height_nogap-block_appl_height)/2
             sta block_top
 ;           clc
             adc #block_appl_height
@@ -1679,19 +1901,18 @@ block_appl_shapes
 
             assume grid_height=10
             assume block_height=20
-            assume grid_screen_top=0
 
 grid_screen_rows
-            ds  grid_width,0
-            ds  grid_width,20
-            ds  grid_width,40
-            ds  grid_width,60
-            ds  grid_width,80
-            ds  grid_width,100
-            ds  grid_width,120
-            ds  grid_width,140
-            ds  grid_width,160
-            ds  grid_width,180
+            ds  grid_width,grid_screen_top+0
+            ds  grid_width,grid_screen_top+20
+            ds  grid_width,grid_screen_top+40
+            ds  grid_width,grid_screen_top+60
+            ds  grid_width,grid_screen_top+80
+            ds  grid_width,grid_screen_top+100
+            ds  grid_width,grid_screen_top+120
+            ds  grid_width,grid_screen_top+140
+            ds  grid_width,grid_screen_top+160
+            ds  grid_width,grid_screen_top+180
 
             assume grid_screen_left=6
             assume block_width=21
