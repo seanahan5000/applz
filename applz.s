@@ -13,44 +13,47 @@
 
 ; constants
 
-block_type_appl = $01
-block_type_edge = $80
-block_type_gv   = $81
-block_type_ob   = $82
+block_type_appl     = $01
+block_type_edge     = $80
+block_type_square   = $81
 
-block_width     = 21   ; including gap
-block_height    = 20   ; including gap
-block_gap       = 2
-block_height_nogap = block_height-block_gap
+block_width         = 21    ; including gap
+block_height        = 20    ; including gap
+block_gap           = 2
+block_height_nogap  = block_height-block_gap
 
-ball_width      = 5
-ball_height     = 5
-dot_height      = 3
+ball_width          = 5
+ball_height         = 5
+dot_height          = 3
 
-grid_screen_left = 6    ; in bytes
-grid_screen_top = 4     ; implicit dependencies
-grid_width      = 9     ; includes left and right padding
-grid_height     = 10    ; includes bottom dead space
-grid_size       = grid_width * grid_height
-grid_screen_width = grid_width * 3 * 7
-grid_border_height = 2
+grid_screen_left    = 6     ; in bytes
+grid_screen_top     = 4     ; implicit dependencies
+grid_width          = 9     ; includes left and right padding
+grid_height         = 10    ; includes bottom dead space
+grid_size           = grid_width*grid_height
+grid_screen_width   = grid_width*3*7
+grid_border_height  = 2
 
-max_aim_dotz    = 32
+max_aim_dots        = 32
 
-wave_x          = 31    ; in bytes
-wave_y          = 20
+wave_x              = 31    ; in bytes
+wave_y              = 20
+high_x              = wave_x
+high_y              = wave_y+9
 
-throttle_ballz  = 16    ; under this ball count, add delay
+throttle_ballz      = 16    ; under this ball count, add delay
 
-send_delay      = 8
+send_delay          = 8
 
-scroll_delta    = 4     ; number of lines stepped per grid scroll
+scroll_delta        = 4     ; number of lines stepped per grid scroll
 
-default_start_x = 72
-default_start_y = 192 - ball_height - 8     ; TODO: move down?
+default_start_x     = 92
+default_start_y     = 192-ball_height-8
 
-min_angle       = 2
-max_angle       = 253
+min_angle           = 6
+max_angle           = 255-min_angle
+
+text_height         = 7     ; excluding line gaps
 
 ; zero page variables
 
@@ -91,6 +94,12 @@ screenh         = $21
 seed0           = $22
 seed1           = $23
 
+ball_x          = $28
+ball_dx         = $29
+ball_y          = $2a
+ball_dy         = $2b
+max_ball_y      = $2c
+
 grid_left       = $30
 grid_dx         = $31
 grid_top        = $32
@@ -110,16 +119,13 @@ wave_bcd0       = $41
 wave_bcd1       = $42
 wave_mag        = $43
 
-applz_ready     = $44   ; applz ready but not yet launched
-applz_ready_bcd0 = $45
-applz_ready_bcd1 = $46
+high_index      = $44
+high_bcd0       = $45
+high_bcd1       = $46
 
-; TODO: move these
-ball_x          = $49
-ball_dx         = $4a
-ball_y          = $4b
-ball_dy         = $4c
-max_ball_y      = $4d
+applz_ready     = $47   ; applz ready but not yet launched
+applz_ready_bcd0 = $48
+applz_ready_bcd1 = $49
 
 ; buffer addresses
 
@@ -150,13 +156,13 @@ pbutton0        = $C061
 PREAD           = $FB1E
 
 ; TODO:
-;   - clamp keyboard aiming on edge of screen
-;   - green/purple vs orange/blue blocks
-;   - draw warning line at bottom of screen
-;   - block counts > 255
-;   - real scoring/high score
-;   - difficulty setting
+;   - game over graphic
 ;   - sound + disable toggle UI
+;   - custom graphics for text
+;   ? clamp keyboard aiming on edge of screen
+;   ? draw warning line at bottom of screen
+;   ? block counts > 255
+;   ? difficulty setting
 
             org $6000
 
@@ -168,22 +174,35 @@ start
             lda #$34
             sta seed1
 
-            lda #1
-            sta input_mode          ; paddle mode by default
+            ldx #1
+            stx input_mode          ; paddle mode by default
 
-            lda #1
-            sta difficulty
+;           ldx #1
+            stx difficulty
+
+;           ldx #1
+            stx high_index
+            stx high_bcd0
+            dex
+            stx high_bcd1
 
             jsr clear1
             jsr erase_screen_grid
 
             ; draw "wave:"
-
             ldx #wave_x
             ldy #wave_y
             jsr set_text_xy
             ldx #<wave_str
             ldy #>wave_str
+            jsr draw_string
+
+            ; draw "high:"
+            ldx #high_x
+            ldy #high_y
+            jsr set_text_xy
+            ldx #<high_str
+            ldy #>high_str
             jsr draw_string
 
             sta primary
@@ -207,6 +226,7 @@ restart     jsr clear_grid
             jmp first_wave_mode
 
 wave_str    dc.b 5,"WAVE:"
+high_str    dc.b 5,"HIGH:"
 
 ; TODO: move this code down lower in file
 
@@ -218,14 +238,16 @@ clear_grid  subroutine
 .loop1      lda #block_type_edge
             sta block_grid,y
             sta block_grid+grid_width-1,y
-            iny
             lda #0
+            sta block_counts,y
+            iny
             ldx #grid_width-2
 .loop2      sta block_grid,y
             sta block_counts,y
             iny
             dex
             bne .loop2
+            sta block_counts,y
             iny
             dec grid_row
             bne .loop1
@@ -266,12 +288,13 @@ compute_max_ball_y subroutine
             dey
             dey
             bpl .1
+            ldy #0
 .3          lda grid_screen_rows+grid_width,y
             clc
             adc #block_height
-            cmp #192-ball_height
+            cmp #192-ball_height-text_height
             bcc .4
-            lda #192-ball_height
+            lda #192-ball_height-text_height
 .4          sta max_ball_y
             rts
 
@@ -283,6 +306,7 @@ next_wave_mode subroutine
             ldx wave_index
             cpx #255            ; cap wave at 255
             bcs .1
+
             inx
             sed
             lda wave_bcd0
@@ -293,6 +317,16 @@ next_wave_mode subroutine
             adc #0
             sta wave_bcd1
             cld
+
+            ; check for highest wave
+
+            cpx high_index
+            bcc .1
+            stx high_index
+            lda wave_bcd0
+            sta high_bcd0
+            lda wave_bcd1
+            sta high_bcd1
 .1          stx wave_index
 
             ; compute wave magnitude, used to scale block fill levels
@@ -317,10 +351,17 @@ first_wave_mode subroutine
             ldx #wave_x+5
             ldy #wave_y
             jsr set_text_xy
-            lda wave_bcd1
-            jsr draw_number
+            ldx wave_bcd1
             lda wave_bcd0
-            jsr draw_number
+            jsr draw_digits3
+
+            ; draw highest wave number
+            ldx #high_x+5
+            ldy #high_y
+            jsr set_text_xy
+            ldx high_bcd1
+            lda high_bcd0
+            jsr draw_digits3
 
             ; randomly place new ball block
 
@@ -359,7 +400,7 @@ first_wave_mode subroutine
             bcc .4
             lda #255                ; clamp counter to maximum value
 .4          sta block_counts,y
-            lda #block_type_ob      ; TODO: pick block_type_gv
+            lda #block_type_square
             sta block_grid,y
             dec block_index
             bne .2
@@ -422,7 +463,7 @@ game_over   subroutine
 
 .2          lda keyboard
             bpl .3
-            and #$7f
+            and #$5f            ; force upper case and remove high bit
             bit unstrobe
             ldx #0
             cmp #"K"
@@ -490,12 +531,13 @@ aiming_mode subroutine
             lda angle_dy_int
             sta dy_int
 
-            jsr draw_dotz
+            jsr draw_dots
 
 .loop2      lda keyboard
             bpl .1
-            and #$7f
             bit unstrobe
+            and #$5f            ; force upper case and remove high bit
+            beq .0              ; <space> forced to upper case
             ldx #0
             cmp #"K"
             beq .new_mode
@@ -508,9 +550,9 @@ aiming_mode subroutine
             beq .key_left
             cmp #$15            ; right arrow
             beq .key_right
-            cmp #" "
+            cmp #$0d            ; return
             bne .1
-            jmp running_mode
+.0          jmp running_mode
 
 .new_mode   stx input_mode
             txa
@@ -552,7 +594,7 @@ aiming_mode subroutine
             dey
 
 .common     sty angle
-            jsr erase_dotz
+            jsr erase_dots
             jsr random          ; update random number on input change
             jmp .loop1
 
@@ -565,7 +607,7 @@ running_mode subroutine
             ldx x_int
             lda y_int
             jsr eor_appl        ; erase aiming ball
-            jsr erase_dotz
+            jsr erase_dots
 
             lda #send_delay
             sta send_countdown
@@ -732,19 +774,36 @@ set_applz_ready subroutine
             sta applz_ready_bcd0
             rts
 
-draw_applz_ready
-            ldx #wave_x+5
-            ldy #wave_y+8
+draw_applz_ready subroutine
+            ldx start_x
+            lda div7,x
+            clc
+            adc #grid_screen_left-1
+            cmp #grid_screen_left+3
+            bcs .1
+            lda #grid_screen_left+3
+.1          cmp #grid_screen_left+(grid_width-2)*3
+            bcc .2
+            lda #grid_screen_left+(grid_width-2)*3
+.2          tax
+            ldy #192-text_height
             jsr set_text_xy
-            lda applz_ready_bcd1
-            jsr draw_number
+            lda applz_ready
+            beq .3
+            ldx applz_ready_bcd1
             lda applz_ready_bcd0
-            jmp draw_number
+            jmp draw_digits3
+.3          ldx #<space3_str
+            ldy #>space3_str
+            jmp draw_string
+
+space3_str  dc.b 3,"   "
+
 ;
-; draw new aiming dotz until edge of screen is hit
+; draw new aiming dots until edge of screen is hit
 ;   (or richochet if difficulty == 0)
 ;
-draw_dotz   subroutine
+draw_dots   subroutine
 
             lda #0
             sta dot_count
@@ -816,13 +875,13 @@ draw_dotz   subroutine
             ldx appl_index
             inx
             stx dot_count
-            cpx #max_aim_dotz
+            cpx #max_aim_dots
             bne .loop1
 .exit       rts
 ;
-; erase all previously drawn aiming dotz
+; erase all previously drawn aiming dots
 ;
-erase_dotz  subroutine
+erase_dots  subroutine
 
             ldx #1
             bne .2          ; always
@@ -892,7 +951,14 @@ wave_done   subroutine
 .1          cmp #grid_screen_width-21-ball_width-1
             bcc .2
             lda #grid_screen_width-21-ball_width-1
-.2          sta start_x
+.2          tax
+
+            ; force ball position to byte alignment + 1
+            sec
+            sbc mod7,x
+;           sec
+            adc #0                  ; +1 to align ball with text
+            sta start_x
             rts
 ;
 ; update single appl position
@@ -956,7 +1022,7 @@ update_appl subroutine
             lda block_grid,y                    ; 4
             bne collide_appl                    ; 2/3
 
-            jmp move_appl                       ; 4 ; TODO: get rid of
+            jmp move_appl                       ; 4
                                                 ; = 128
 ; reflect ball at top of screen
 
@@ -1000,11 +1066,11 @@ up_down_x1  lda grid_left
 
 .up         lda block_grid,y
             bmi .bounce_dy
-            jmp move_appl       ; TODO: get rid of
+            jmp move_appl
 
 .down       lda block_grid+grid_width,y
             bmi .next_y_bounce_dy
-            jmp move_appl       ; TODO: get rid of
+            jmp move_appl
 
 .next_y_bounce_dy
             tya
@@ -1012,7 +1078,7 @@ up_down_x1  lda grid_left
             adc #grid_width
             tay
 .bounce_dy  jsr reflect_y
-            jmp hit_move_appl   ; TODO: get rid of
+            jmp hit_move_appl
 ;
 ; ball moving horizontally crossed vertical edge on single block
 ;
@@ -1026,10 +1092,10 @@ left_right_y1
             iny                 ; look at right edge
 .left       lda block_grid,y
             bmi .bounce_dx
-            jmp move_appl       ; TODO: get rid of
+            jmp move_appl
 
 .bounce_dx  jsr reflect_x
-            jmp hit_move_appl   ; TODO: get rid of
+            jmp hit_move_appl
 ;
 ; ball moving horizontally crossed vertical edge on two blocks
 ;
@@ -1621,18 +1687,11 @@ draw_block  subroutine
 
             ldx #$00
             lda block_counts,y
-            cmp #64     ;wave_index
+            cmp #64
             bcc .1
             beq .1
             ldx #$80
 .1          stx block_color
-
-            ; TODO: base on wave_mag instead?
-;             ldx #$80
-;             cmp #block_type_ob
-;             beq .1
-;             ldx #$00
-; .1          stx block_color
 
             ; compute number of top empty and bottom full lines in block
 
@@ -1944,7 +2003,7 @@ eor_dot     subroutine
             lda #dot_height
             sta ycount
             ldy mod7,x
-            ldx dotz_lo,y
+            ldx dots_lo,y
 .loop       ldy ypos
             lda hires_table_lo,y
             sta screenl
@@ -1969,8 +2028,6 @@ eor_dot     subroutine
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
 
-; TODO: temporary, to be phased out as callers are cleaned up
-
 hit_move_appl subroutine
 
             jsr hit_block
@@ -1987,8 +2044,6 @@ move_appl   subroutine
             bcs move_appl_ur        ; 2/3
             bcc move_appl_ul        ; 3 always
 
-; TODO: this may eventually call back into main appl update look
-; TODO: if not, make callers jump directly to hit_block
 hit_no_move jmp hit_block
 
 ; eor move:
@@ -2162,7 +2217,6 @@ move_appl_ur subroutine
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
 
-; TODO: temporary, to be phased out as callers are cleaned up
 move_down   lda ball_dx             ; 3
             cmp ball_x              ; 3
             bcs move_appl_dr        ; 2/3
@@ -2386,7 +2440,9 @@ eor_appl    subroutine
 ;   Assumes seed0 and seed1 zpage values have been initialized.
 ;   35 bytes, 69 cycles
 ;
-random      lda seed1
+random      subroutine
+
+            lda seed1
             tay
             lsr
             lsr
@@ -2453,7 +2509,7 @@ clear1      subroutine
             bne .loop
             rts
 
-dotz_lo     dc.b #<dot0
+dots_lo     dc.b #<dot0
             dc.b #<dot1
             dc.b #<dot2
             dc.b #<dot3

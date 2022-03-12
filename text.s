@@ -1,8 +1,17 @@
-
+;
+; on entry:
+;   x: x position in bytes
+;   y: y position in lines
+;
 set_text_xy stx xpos
             sty ypos
             rts
-
+;
+; on entry
+;
+;   x: string pointer low
+;   y: string pointer high
+;
 draw_string subroutine
 
             stx textl
@@ -21,12 +30,18 @@ draw_string subroutine
             iny
             bne .1          ; always
 .2          rts
-
-
+;
 ; on entry:
-;   a: two digit number
-
-draw_number pha
+;   x: high 1 digit
+;   a: low 2 digits
+;
+draw_digits3 subroutine
+            pha
+            txa
+            and #$0f
+            jsr draw_index_char
+            pla
+            pha
             lsr
             lsr
             lsr
@@ -165,10 +180,10 @@ font        dc.b %00011110      ; 0
             dc.b %00111111      ; 7
             dc.b %00110000
             dc.b %00110000
-            dc.b %00110000
-            dc.b %00110000
-            dc.b %00110000
-            dc.b %00110000
+            dc.b %00011000
+            dc.b %00001100
+            dc.b %00001100
+            dc.b %00001100
 
             dc.b %00011110      ; 8
             dc.b %00110011
