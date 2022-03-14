@@ -41,7 +41,7 @@ wave_y              = 20
 high_x              = wave_x
 high_y              = wave_y+9
 
-throttle_ballz      = 16    ; under this ball count, add delay
+throttle_applz      = 16    ; under this ball count, add delay
 
 send_delay          = 8
 
@@ -82,7 +82,8 @@ angle_dx_frac   = $18
 angle_dx_int    = $19
 angle_dy_frac   = $1a
 angle_dy_int    = $1b
-button_up       = $1c   ; saw button up between unthrottle mode and aiming
+
+pbutton0_prev   = $1c   ; paddle 0 button value from previous check
 
 start_x         = $1d   ; variable position relative to grid edge
 send_countdown  = $1e
@@ -126,6 +127,8 @@ high_bcd1       = $46
 applz_ready     = $47   ; applz ready but not yet launched
 applz_ready_bcd0 = $48
 applz_ready_bcd1 = $49
+
+fast_applz      = $4a   ; send applz without throttling
 
 ; buffer addresses
 
@@ -174,7 +177,9 @@ start
             lda #$34
             sta seed1
 
-            ldx #1
+            ldx #0
+            stx pbutton0_prev
+            inx
             stx input_mode          ; paddle mode by default
 
 ;           ldx #1
@@ -452,17 +457,8 @@ game_over   subroutine
 
             ; TODO: put up "game over" graphic
 
-            ldx input_mode
-            beq .2
-
-            ; wait for a button press to end game and start a new one
-            ; (make sure button has been seen as up, then wait for it to
-            ;   go down again before restarting)
-.1          bit pbutton0
-            bmi .1
-
-.2          lda keyboard
-            bpl .3
+.1          lda keyboard
+            bpl .2
             and #$5f            ; force upper case and remove high bit
             bit unstrobe
             ldx #0
@@ -473,18 +469,23 @@ game_over   subroutine
             beq .new_mode
             ; ignore arrows so they don't trigger new game
             cmp #$08            ; left arrow
-            beq .2
+            beq .1
             cmp #$15            ; right arrow
-            beq .2
+            beq .1
             ldx input_mode
             beq .to_restart
 
 .new_mode   stx input_mode
-.3          lda input_mode
-            beq .2
+.2          lda input_mode
+            beq .1
 
-.joy_mode   bit pbutton0
-            bpl .2
+.joy_mode   lda pbutton0
+            tax
+            eor pbutton0_prev
+            bpl .1
+            stx pbutton0_prev
+            txa
+            bpl .1
 
 .to_restart
             ; TODO: erase "game over" graphic
@@ -517,8 +518,8 @@ aiming_mode subroutine
 
             lda #$80
             sta angle
-            lda #0
-            sta button_up
+            ; lda #0
+            ; sta button_up
             bit unstrobe
 
 .loop1      jsr update_angle
@@ -559,16 +560,18 @@ aiming_mode subroutine
             bne .joy_mode
             ldy #$80
             bne .common         ; always
+
 .1          ldx input_mode
             beq .loop2
-.joy_mode   ldx #1
-            bit pbutton0        ; check for paddle 0 button press
-            bpl .2
-            ldx button_up       ; must have seen button up once in case
-            bne running_mode    ;   unthrottled mode was being used coming in
-.2          stx button_up
 
-            ldx #0
+.joy_mode   lda pbutton0        ; check for paddle 0 button press
+            tax
+            eor pbutton0_prev
+            bpl .2
+            stx pbutton0_prev
+            txa
+            bmi running_mode    ; if newly down, start running
+.2          ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #min_angle      ; clamp value to [2,253]
             bcs .3
@@ -615,7 +618,7 @@ running_mode subroutine
             lda #0
             sta applz_visible
             sta appl_slots
-            sta button_up
+            sta fast_applz
             beq .first          ; always
 
             ; update and redraw visible applz
@@ -631,7 +634,7 @@ running_mode subroutine
             lda keyboard
             bpl .1
             bit unstrobe
-            and #$7f
+            and #$5f            ; force upper case and remove high bit
             ldx #0
             cmp #"K"
             beq .new_mode
@@ -640,34 +643,34 @@ running_mode subroutine
             beq .new_mode
             ldx input_mode
             bne .joy_mode
-            lda button_up
+            lda fast_applz
             eor #1
-            sta button_up
+            sta fast_applz
 .new_mode   stx input_mode
 .1          ldx input_mode
-            beq .key_mode
+            beq .throttle
 
             ; check for throttling ball movement speed
             ;   (must have seen button up once in case
             ;   unthrottled mode was being used coming in)
 
-.joy_mode   ldx button_up
-            bne .2
-            bit pbutton0
-            bmi .throttle
-            ldx #1
-            stx button_up
-.2          bit pbutton0
-            bmi .nodelay
-            bpl .throttle       ; always
-
-.key_mode   lda button_up
-            bne .nodelay
+.joy_mode   lda pbutton0
+            tax
+            eor pbutton0_prev
+            bpl .throttle
+            stx pbutton0_prev
+            ldy #0
+            txa
+            bpl .2
+            iny
+.2          sty fast_applz
 
             ; add delay for low ball counts
-            ;   (~600 cycles per ball below throttle_ballz)
+            ;   (~600 cycles per ball below throttle_applz)
 
-.throttle   lda #throttle_ballz
+.throttle   lda fast_applz
+            bne .nodelay
+            lda #throttle_applz
             sec
             sbc appl_slots
             bcc .nodelay
