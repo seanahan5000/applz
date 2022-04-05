@@ -26,7 +26,7 @@ ball_width          = 5
 ball_height         = 5
 dot_height          = 3
 
-grid_screen_left    = 6     ; in bytes
+grid_screen_left    = 14    ; in bytes
 grid_screen_top     = 4     ; implicit dependencies
 grid_width          = 9     ; includes left and right padding
 grid_height         = 10    ; includes bottom dead space
@@ -36,8 +36,8 @@ grid_border_height  = 2
 
 max_aim_dots        = 32
 
-wave_x              = 31    ; in bytes
-wave_y              = 20
+wave_x              = 4     ; in bytes
+wave_y              = 192-24
 high_x              = wave_x
 high_y              = wave_y+9
 
@@ -159,9 +159,8 @@ pbutton0        = $C061
 PREAD           = $FB1E
 
 ; TODO:
-;   - game over graphic
+;   - animate title logo
 ;   - sound + disable toggle UI
-;   - custom graphics for text
 ;   ? clamp keyboard aiming on edge of screen
 ;   ? draw warning line at bottom of screen
 ;   ? block counts > 255
@@ -171,7 +170,6 @@ PREAD           = $FB1E
 
 start
             ; init random number seed values
-
             lda #$12
             sta seed0
             lda #$34
@@ -193,22 +191,8 @@ start
 
             jsr clear1
             jsr erase_screen_grid
-
-            ; draw "wave:"
-            ldx #wave_x
-            ldy #wave_y
-            jsr set_text_xy
-            ldx #<wave_str
-            ldy #>wave_str
-            jsr draw_string
-
-            ; draw "high:"
-            ldx #high_x
-            ldy #high_y
-            jsr set_text_xy
-            ldx #<high_str
-            ldy #>high_str
-            jsr draw_string
+            jsr draw_logo
+            jsr draw_wave_high
 
             sta primary
             sta fullscreen
@@ -229,9 +213,6 @@ restart     jsr clear_grid
             lda #default_start_x
             sta start_x
             jmp first_wave_mode
-
-wave_str    dc.b 5,"WAVE:"
-high_str    dc.b 5,"HIGH:"
 
 ; TODO: move this code down lower in file
 
@@ -455,7 +436,7 @@ first_wave_mode subroutine
 
 game_over   subroutine
 
-            ; TODO: put up "game over" graphic
+            jsr draw_game_over
 
 .1          lda keyboard
             bpl .2
@@ -487,10 +468,7 @@ game_over   subroutine
             txa
             bpl .1
 
-.to_restart
-            ; TODO: erase "game over" graphic
-            ; TODO: erase old text?
-            jmp restart
+.to_restart jmp restart
 
 ;=======================================
 ; Aiming mode
@@ -796,11 +774,7 @@ draw_applz_ready subroutine
             ldx applz_ready_bcd1
             lda applz_ready_bcd0
             jmp draw_digits3
-.3          ldx #<space3_str
-            ldy #>space3_str
-            jmp draw_string
-
-space3_str  dc.b 3,"   "
+.3          jmp draw_spaces3
 
 ;
 ; draw new aiming dots until edge of screen is hit
@@ -1976,20 +1950,20 @@ grid_screen_rows
             ds  grid_width,grid_screen_top+160
             ds  grid_width,grid_screen_top+180
 
-            assume grid_screen_left=6
+            assume grid_screen_left=14
             assume block_width=21
 
 grid_screen_cols
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
-            dc.b 6,9,12,15,18,21,24,27,30
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
+            dc.b 14,17,20,23,26,29,32,35,38
 ;
 ; eor a single aiming dot shape
 ;
@@ -2438,6 +2412,358 @@ eor_appl    subroutine
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
 ;
+; draw entire Applz logo
+;
+draw_logo   subroutine
+
+            ldx #0
+.1          txa
+            pha
+            jsr draw_logo_letter
+            pla
+            tax
+            inx
+            cpx #5
+            bne .1
+            rts
+;
+; draw one letter of Applz logo
+;
+; on entry:
+;   X: letter index
+;
+draw_logo_letter subroutine
+
+            lda logos_lo,x
+            sta .logo_mod+1
+            lda logos_hi,x
+            sta .logo_mod+2
+            lda logo_lefts,x
+            sta .xstart_mod+1
+            clc
+            adc logo_widths,x
+            sta .xend_mod+1
+            lda logo_tops,x
+            clc
+            adc logo_yoffs,x
+            tay
+            clc
+            adc logo_heights,x
+            sta .yend_mod+1
+            ldx #0
+.1          sty ypos
+            lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+.xstart_mod ldy #$ff
+.logo_mod   lda logo_a,x
+            sta (screenl),y
+            inx
+            iny
+.xend_mod   cpy #$ff
+            bne .logo_mod
+            ldy ypos
+            iny
+.yend_mod   cpy #$ff
+            bne .1
+            rts
+
+logo_yoffs  dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+
+logo_tops   dc.b 35+0
+            dc.b 35+17
+            dc.b 35+17
+            dc.b 35
+            dc.b 35+17
+
+logo_heights
+            dc.b 39
+            dc.b 57-17
+            dc.b 57-17
+            dc.b 39
+            dc.b 39-17
+
+logo_lefts  dc.b 1
+            dc.b 4
+            dc.b 8
+            dc.b 11
+            dc.b 12
+
+logo_widths dc.b 3
+            dc.b 4
+            dc.b 3
+            dc.b 1
+            dc.b 3
+
+;-------------------------------------------------------------------------------
+
+game_over_top = 64
+game_over_bottom = 82
+game_over_left = 20
+game_over_right = 35
+
+draw_game_over subroutine
+            ldx #0
+            ldy #game_over_top
+.1          sty ypos
+            lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+            ldy #game_over_left
+            lda #0
+            sta (screenl),y
+            iny
+.2          lda game_over_image,x
+            sta (screenl),y
+            inx
+            iny
+            cpy #game_over_right-1
+            bne .2
+            lda #0
+            sta (screenl),y
+            ldy ypos
+            iny
+            cpy #game_over_bottom
+            bne .1
+            rts
+
+game_over_image
+            hex 00000000000000000000000000
+            hex C0AAD5AAD5AAD5AAD5AAD5AA81
+            hex D0AAD5AAD5AAD5AAD5AAD5AA85
+            hex D082000000000000000000A085
+            hex D0000000000000000000000085
+            hex D0001E1E333F001E333F1F0085
+            hex D00033333F3300333333330085
+            hex D00003333F0300333303330085
+            hex D0003B3F330F0033331F1F0085
+            hex D0003333330300333303330085
+            hex D0003333333300331E33330085
+            hex D0001E33333F001E0C3F330085
+            hex D0000000000000000000000085
+            hex D082000000000000000000A085
+            hex D0AAD5AAD5AAD5AAD5AAD5AA85
+            hex C0AAD5AAD5AAD5AAD5AAD5AA81
+            hex 00000000000000000000000000
+            hex 00000000000000000000000000
+
+;-------------------------------------------------------------------------------
+
+draw_wave_high subroutine
+
+            ldx #0
+            ldy #wave_y
+.1          sty ypos
+            lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+            ldy #wave_x
+.2          lda wave_high_image,x
+            sta (screenl),y
+            inx
+            iny
+            cpy #wave_x+5
+            bne .2
+            ldy ypos
+            iny
+            cpy #wave_y+16
+            bne .1
+            rts
+
+wave_high_image
+            hex 331E333F00
+            hex 333333330C
+            hex 333333030C
+            hex 333F330F00
+            hex 3F3333030C
+            hex 3F331E330C
+            hex 33330C3F00
+            hex 0000000000
+            hex 0000000000
+            hex 331E1E3300
+            hex 330C33330C
+            hex 330C03330C
+            hex 3F0C3B3F00
+            hex 330C33330C
+            hex 330C33330C
+            hex 331E1E3300
+
+;-------------------------------------------------------------------------------
+;
+; set next location to draw text
+;
+; on entry:
+;   x: x position in bytes
+;   y: y position in lines
+;
+set_text_xy stx xpos
+            sty ypos
+            rts
+;
+; draw 3 digit number
+;
+; on entry:
+;   x: high 1 digit
+;   a: low 2 digits
+;
+draw_digits3 subroutine
+            pha
+            txa
+            and #$0f
+            jsr draw_index_char
+            pla
+            pha
+            lsr
+            lsr
+            lsr
+            lsr
+            jsr draw_index_char
+            pla
+            and #$0f
+            bpl draw_index_char ; always
+
+draw_spaces3
+            lda #10
+            jsr draw_index_char
+            lda #10
+            jsr draw_index_char
+            lda #10
+
+draw_index_char
+            ldy #>font
+            sta temp
+            asl
+            asl
+            asl
+            bcc .1
+            iny
+.1          clc
+            adc #<font
+            bcc .2
+            iny
+.2          sec
+            sbc temp
+            sta char_mod+1
+            bcs .3
+            dey
+.3          sty char_mod+2
+
+draw_char   ldx #0
+            lda ypos
+            sta ycount
+char_loop   ldy ycount
+            lda hires_table_lo,y
+            sta screenl
+            lda hires_table_hi,y
+            sta screenh
+char_mod    lda font,x
+            ldy xpos
+            sta (screenl),y
+            inc ycount
+            inx
+            cpx #7
+            bne char_loop
+            inc xpos
+            rts
+
+font        dc.b %00011110      ; 0
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00001100      ; 1
+            dc.b %00001110
+            dc.b %00001100
+            dc.b %00001100
+            dc.b %00001100
+            dc.b %00001100
+            dc.b %00011110
+
+            dc.b %00011110      ; 2
+            dc.b %00110011
+            dc.b %00110000
+            dc.b %00011100
+            dc.b %00000110
+            dc.b %00000011
+            dc.b %00111111
+
+            dc.b %00011110      ; 3
+            dc.b %00110011
+            dc.b %00110000
+            dc.b %00011100
+            dc.b %00110000
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00110011      ; 4
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00111111
+            dc.b %00110000
+            dc.b %00110000
+            dc.b %00110000
+
+            dc.b %00111111      ; 4
+            dc.b %00000011
+            dc.b %00000011
+            dc.b %00011111
+            dc.b %00110000
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00011110      ; 6
+            dc.b %00110011
+            dc.b %00000011
+            dc.b %00011111
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00111111      ; 7
+            dc.b %00110000
+            dc.b %00110000
+            dc.b %00011000
+            dc.b %00001100
+            dc.b %00001100
+            dc.b %00001100
+
+            dc.b %00011110      ; 8
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00011110
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00011110      ; 9
+            dc.b %00110011
+            dc.b %00110011
+            dc.b %00111110
+            dc.b %00110000
+            dc.b %00110011
+            dc.b %00011110
+
+            dc.b %00000000      ; <space>
+            dc.b %00000000
+            dc.b %00000000
+            dc.b %00000000
+            dc.b %00000000
+            dc.b %00000000
+            dc.b %00000000
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+;
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
 ;   Assumes seed0 and seed1 zpage values have been initialized.
@@ -2687,4 +3013,3 @@ hires_table_hi
             hex 23272b2f33373b3f
 
             include applz.data.s
-            include text.s
