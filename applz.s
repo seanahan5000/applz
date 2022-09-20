@@ -159,8 +159,18 @@ pbutton0        = $C061
 PREAD           = $FB1E
 
 ; TODO:
-;   - animate title logo
+;   * during title animation, don't allow aiming
 ;   - sound + disable toggle UI
+;       - review Ballz sound effects
+;       - ball/wall bounce
+;       - ball/block bounce
+;       - block removed
+;       - apple collected
+;       - title screen tune
+;       - game over sound
+;       - block animation sound
+;   - intro animation (CALLACO presents...)
+;   - new game block animation
 ;   ? clamp keyboard aiming on edge of screen
 ;   ? draw warning line at bottom of screen
 ;   ? block counts > 255
@@ -194,6 +204,9 @@ start
 
             jsr clear1
             jsr erase_screen_grid
+
+            jsr block_fill_test
+
             jsr draw_logo
             jsr draw_wave_high
 
@@ -203,7 +216,7 @@ start
             sta graphics
 
 restart     jsr clear_grid
-            jsr erase_screen_grid
+            ;jsr erase_screen_grid
 
             ldx #1
             stx wave_bcd0
@@ -402,7 +415,7 @@ first_wave_mode subroutine
             lda block_grid,y
             bpl .6
             sty block_index
-            jsr draw_block
+            jsr draw_game_block
             ldy block_index
 .6          iny
             cpy #grid_size-grid_width-1
@@ -478,6 +491,9 @@ game_over   subroutine
 .to_restart jsr abort_logo
 .3          jsr animate_logo
             bcs .3
+
+            jsr block_fill_test
+
             jmp restart
 
 ;=======================================
@@ -1455,7 +1471,7 @@ hit_block   subroutine
 
 .2          lda block_grid,y
             sty block_index
-            jsr draw_block
+            jsr draw_game_block
             ldx appl_index      ; restore ball index
             ldy block_index     ; restore block index
             rts
@@ -1544,7 +1560,7 @@ scroll_screen_grid subroutine
 erase_screen_grid subroutine
 
             ldx #0
-.1          lda hires_table_lo,x
+.loop1      lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1582,7 +1598,7 @@ erase_screen_grid subroutine
 
             inx
             cpx #192
-            bne .1
+            bne .loop1
             rts
 ;
 ; update aiming angle delta values
@@ -1643,29 +1659,101 @@ update_angle subroutine
             sta angle_dy_int
             rts
 ;
-; table of 128 sine values from [0, PI / 2)
+; ***
 ;
-;   for (uint32_t i = 0; i < 128; ++i)
-;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+block_fill_test subroutine
+
+            ldy #0
+.loop1      sty ypos
+            cpy #3
+            bne .1
+            jsr erase_game_over
+            ldy ypos
+.1          jsr fill_grid_row
+            ldy ypos
+            iny
+            cpy #grid_height
+            bne .loop1
+
+            ldy #0
+.loop2      sty ypos
+            jsr erase_grid_row
+            ldy ypos
+            iny
+            cpy #grid_height
+            bne .loop2
+            rts
 ;
-sine_table  hex 000306090c0f1215
-            hex 191c1f2225282b2e
-            hex 3135383b3e414447
-            hex 4a4d505356595c5f
-            hex 6164676a6d707375
-            hex 787b7e808386888b
-            hex 8e909395989b9d9f
-            hex a2a4a7a9abaeb0b2
-            hex b5b7b9bbbdbfc1c3
-            hex c5c7c9cbcdcfd1d3
-            hex d4d6d8d9dbdddee0
-            hex e1e3e4e6e7e8eaeb
-            hex ecedeeeff1f2f3f4
-            hex f4f5f6f7f8f9f9fa
-            hex fbfbfcfcfdfdfefe
-            hex feffffffffffffff
+; on entry:
+;   y: grid row
 ;
-; draw a single grid block
+fill_grid_row subroutine
+            ldx grid_rows+1,y
+            dex
+            stx xpos
+            tya
+            lsr
+            lda #$0
+            ror
+            sta block_color
+            lda grid_rows,y
+            tay
+            iny
+.loop1      sty block_index
+            jsr draw_title_block
+            ldy block_index
+            iny
+            cpy xpos
+            bne .loop1
+            rts
+;
+; on entry:
+;   y: grid row
+;
+erase_grid_row subroutine
+            ldx grid_rows+1,y
+            dex
+            stx xpos
+            lda grid_rows,y
+            tay
+            iny
+.loop1      sty block_index
+            jsr erase_block
+            ldy block_index
+            iny
+            cpy xpos
+            bne .loop1
+            rts
+
+grid_rows   dc.b    grid_width*0
+            dc.b    grid_width*1
+            dc.b    grid_width*2
+            dc.b    grid_width*3
+            dc.b    grid_width*4
+            dc.b    grid_width*5
+            dc.b    grid_width*6
+            dc.b    grid_width*7
+            dc.b    grid_width*8
+            dc.b    grid_width*9
+            dc.b    grid_width*10
+;
+; draw a specific block color/fill level for
+;   title and game start block animation
+;
+; on entry
+;   y: grid index of block
+;   block color: $00 or $80
+;
+draw_title_block subroutine
+            lda #block_height_nogap-2-2
+            sta block_top
+            lda #4*4
+            sta block_mid
+            lda #2-1
+            sta block_bot
+            bpl draw_block      ; always
+;
+; compute block fill level and color, then draw
 ;
 ; on entry
 ;   y: grid index of block
@@ -1674,7 +1762,7 @@ sine_table  hex 000306090c0f1215
 wave_masks  dc.b 0, 1, 3, 7, 15, 31
 wave_shifts dc.b 0, 2, 1, 0, -1, -2
 
-draw_block  subroutine
+draw_game_block  subroutine
 
             ldx #$00
             lda block_counts,y
@@ -1727,9 +1815,16 @@ draw_block  subroutine
             sta block_mid
             beq .9
             dec block_top
-.9
-
-draw_lines  ldx grid_screen_rows,y
+.9          ; fall through
+;
+; on entry
+;   y: grid index of block
+;   block_top, block_mid, block_bot, block_color set up
+;
+; xpos is unchanged
+;
+draw_block  subroutine
+            ldx grid_screen_rows,y
             lda grid_screen_cols,y
             tay
 
@@ -1757,8 +1852,10 @@ draw_lines  ldx grid_screen_rows,y
 
             ; top empty lines
             lda block_top
-            beq .11
-.10         lda hires_table_lo,x
+            beq .2
+.1          cpx #192
+            beq .21
+            lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1778,11 +1875,13 @@ draw_lines  ldx grid_screen_rows,y
             dey
             dey
             dec block_top
-            bne .10
-.11
+            bne .1
+.2
             ; partial line
             lda block_mid
-            beq .12
+            beq .3
+            cpx #192
+.21         beq .41
             lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
@@ -1808,9 +1907,11 @@ draw_lines  ldx grid_screen_rows,y
             dey
             pla
             tax
-.12
+.3
             ; bottom full lines
-.13         lda hires_table_lo,x
+.4          cpx #192
+.41         beq .5
+            lda hires_table_lo,x
             sta screenl
             lda hires_table_hi,x
             sta screenh
@@ -1831,8 +1932,8 @@ draw_lines  ldx grid_screen_rows,y
             dey
             dey
             dec block_bot
-            bpl .13             ; draw bottom line by letting count go negative
-            rts
+            bpl .4              ; draw bottom line by letting count go negative
+.5          rts
 
 block_lines hex 01001000        ; 0 (empty)
             hex 05001000        ; 1
@@ -1855,7 +1956,10 @@ erase_block subroutine
             tax
             clc
             adc #block_height_nogap
-            sta block_bot
+            cmp #192
+            bcc .1
+            lda #192
+.1          sta block_bot
             lda grid_screen_cols,y
             tay
 .loop       lda hires_table_lo,x
@@ -1980,6 +2084,7 @@ grid_screen_cols
             dc.b 14,17,20,23,26,29,32,35,38
 ;
 ; eor a single aiming dot shape
+;*** GROUP THIS WITH AIMING CODE ***
 ;
 eor_dot     subroutine
 
@@ -2016,8 +2121,58 @@ eor_dot     subroutine
             bne .loop
             rts
 
+dots_lo     dc.b <dot0
+            dc.b <dot1
+            dc.b <dot2
+            dc.b <dot3
+            dc.b <dot4
+            dc.b <dot5
+            dc.b <dot6
+
+            align 256
+
+dot0        dc.b %00000000, %00000000
+            dc.b %00001100, %00000000
+            dc.b %00001100, %00000000
+
+dot1        dc.b %00000000, %00000000
+            dc.b %00011000, %00000000
+            dc.b %00011000, %00000000
+
+dot2        dc.b %00000000, %00000000
+            dc.b %00110000, %00000000
+            dc.b %00110000, %00000000
+
+dot3        dc.b %00000000, %00000000
+            dc.b %01100000, %00000000
+            dc.b %01100000, %00000000
+
+dot4        dc.b %00000000, %00000000
+            dc.b %01000000, %00000001
+            dc.b %01000000, %00000001
+
+dot5        dc.b %00000000, %00000000
+            dc.b %00000000, %00000011
+            dc.b %00000000, %00000011
+
+dot6        dc.b %00000000, %00000000
+            dc.b %00000000, %00000110
+            dc.b %00000000, %00000110
+
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
+
+;**** COMMENTS EXPLAINING WHAT ALL OF THIS IS DOING ***
+
+; eor move:
+;
+;   67 * 7 + 93 = 474 + 93 = 567
+;   67 * 6 + 93 = 407 + 93 = 500
+;   67 * 5 + 93 = 340 + 93 = 433
+;
+; simple erase/draw:
+;
+;   373 * 2 = 746
 
 hit_move_appl subroutine
 
@@ -2036,19 +2191,6 @@ move_appl   subroutine
             bcc move_appl_ul        ; 3 always
 
 hit_no_move jmp hit_block
-
-; eor move:
-;
-;   67 * 7 + 93 = 474 + 93 = 567
-;   67 * 6 + 93 = 407 + 93 = 500
-;   67 * 5 + 93 = 340 + 93 = 433
-;
-; simple erase/draw:
-;
-;   373 * 2 = 746
-
-;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
 
 hit_move_appl_ul subroutine
 
@@ -2124,9 +2266,6 @@ move_appl_ul subroutine
             bne .loop               ; 3/2
                                     ; = 67 (340/407/474)
 .exit       rts                     ; 6
-
-;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
 
 hit_move_appl_ur subroutine
 
@@ -2204,9 +2343,6 @@ move_appl_ur subroutine
             bne .loop               ; 3/2
                                     ; = 67 (340/407/474)
 .exit       rts                     ; 6
-
-;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
 
 move_down   lda ball_dx             ; 3
             cmp ball_x              ; 3
@@ -2290,9 +2426,6 @@ move_appl_dl subroutine
                                     ; = 67 (340/407/474)
 .exit       rts                     ; 6
 
-;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
-
 hit_move_appl_dr subroutine
 
             jsr hit_block
@@ -2369,7 +2502,6 @@ move_appl_dr subroutine
 .exit       rts                     ; 6
 
 ;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
 ;
 ; eor a ball shape without movement
 ;
@@ -2424,251 +2556,6 @@ eor_appl    subroutine
 .exit       rts
 
 ;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
-
-sine_step   =   8
-delay_step  =   4
-
-; on exit:
-;   sec: animation running
-;   clc: animation complete
-;
-animate_logo subroutine
-
-            ldx #4
-.1          lda logo_bounce,x
-            bne .2
-            dex
-            bpl .1
-            clc                 ; logo complete
-            rts
-
-.2          ldx #4
-.3          lda logo_delay,x
-            beq .4
-            dec logo_delay,x
-            bpl .9              ; always
-
-.4          lda logo_bounce,x
-            beq .9
-
-            lda logo_yind,x
-            ldy logo_dyind,x
-            bmi .5
-            clc
-            adc #sine_step
-            tay
-            sta logo_yind,x
-            bpl .7
-            sec
-            sbc #sine_step*2
-            sta logo_yind,x
-            tay
-            bpl .6              ; always
-
-.5          sec
-            sbc #sine_step
-            sta logo_yind,x
-            tay
-            bpl .7
-            clc
-            adc #sine_step*2
-            sta logo_yind,x
-            tay
-
-            lda #0
-            dec logo_bounce,x
-            beq .8
-
-            lda logo_dyoff,x
-            eor #$ff
-            sta logo_dyoff,x
-
-.6          lda logo_dyind,x
-            eor #$ff
-            sta logo_dyind,x
-.7          lda sine_table,y
-            lsr
-            lsr
-            lsr
-            lsr
-            eor logo_dyoff,x
-            sec
-            sbc logo_dyoff,x
-.8          sta logo_yoff,x
-.9          dex
-            bpl .3
-            jsr draw_logo
-            sec                 ; logo running
-            rts
-
-; on entry:
-;   A: bounce count (max #128)
-;
-reset_logo  subroutine
-
-            asl
-            sec
-            sbc #1
-            ldx #4
-.1          sta logo_bounce,x
-            dex
-            bpl .1
-
-            ldx #4
-            lda #0
-            clc
-.2          sta logo_delay,x
-            adc #delay_step
-            dex
-            bpl .2
-
-            ldx #4
-            lda #0
-.3          sta logo_yind,x
-            sta logo_dyind,x
-            sta logo_yoff,x
-            dex
-            bpl .3
-
-            ldx #4
-            lda #$ff
-.4          sta logo_dyoff,x
-            dex
-            bpl .4
-            rts
-
-abort_logo  subroutine
-
-            ldx #4
-.1          lda logo_bounce,x
-            beq .2
-            lda #1
-            sta logo_bounce,x
-.2          dex
-            bpl .1
-            rts
-
-logo_delay  dc.b delay_step*0
-            dc.b delay_step*1
-            dc.b delay_step*2
-            dc.b delay_step*3
-            dc.b delay_step*4
-
-logo_bounce dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-
-logo_yind   dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-
-logo_dyind  dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-
-logo_yoff   dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-
-logo_dyoff  dc.b $ff
-            dc.b $ff
-            dc.b $ff
-            dc.b $ff
-            dc.b $ff
-;
-; draw entire Applz logo
-;
-draw_logo   subroutine
-
-            ldx #0
-.1          txa
-            pha
-            jsr draw_logo_letter
-            pla
-            tax
-            inx
-            cpx #5
-            bne .1
-            rts
-;
-; draw one letter of Applz logo
-;
-; on entry:
-;   X: letter index
-;
-draw_logo_letter subroutine
-
-            lda logos_lo,x
-            sta .logo_mod+1
-            lda logos_hi,x
-            sta .logo_mod+2
-            lda logo_lefts,x
-            sta .xstart_mod+1
-            clc
-            adc logo_widths,x
-            sta .xend_mod+1
-            lda logo_tops,x
-            clc
-            adc logo_yoff,x
-            tay
-            clc
-            adc logo_heights,x
-            sta .yend_mod+1
-            ldx #0
-.1          sty ypos
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-.xstart_mod ldy #$ff
-.logo_mod   lda logo_a,x
-            sta (screenl),y
-            inx
-            iny
-.xend_mod   cpy #$ff
-            bne .logo_mod
-            ldy ypos
-            iny
-.yend_mod   cpy #$ff
-            bne .1
-            rts
-
-logo_top    =   34
-logo_tops   dc.b logo_top+0
-            dc.b logo_top+17
-            dc.b logo_top+17
-            dc.b logo_top
-            dc.b logo_top+17
-
-logo_heights
-            dc.b 41
-            dc.b 59-17
-            dc.b 59-17
-            dc.b 41
-            dc.b 41-17
-
-logo_lefts  dc.b 1
-            dc.b 4
-            dc.b 8
-            dc.b 11
-            dc.b 12
-
-logo_widths dc.b 3
-            dc.b 4
-            dc.b 3
-            dc.b 1
-            dc.b 4
-
-;-------------------------------------------------------------------------------
 
 game_over_top = 64
 game_over_bottom = 82
@@ -2698,6 +2585,23 @@ draw_game_over subroutine
             ldy ypos
             iny
             cpy #game_over_bottom
+            bne .1
+            rts
+
+erase_game_over subroutine
+            ldx #game_over_top
+.1          lda hires_table_lo,x
+            sta screenl
+            lda hires_table_hi,x
+            sta screenh
+            ldy #game_over_left
+            lda #0
+.2          sta (screenl),y
+            iny
+            cpy #game_over_right
+            bne .2
+            inx
+            cpx #game_over_bottom
             bne .1
             rts
 
@@ -2930,7 +2834,6 @@ font        dc.b %00011110      ; 0
             dc.b %00000000
 
 ;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
 ;
 ; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
 ; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
@@ -3005,44 +2908,28 @@ clear1      subroutine
             inx
             bne .loop
             rts
-
-dots_lo     dc.b #<dot0
-            dc.b #<dot1
-            dc.b #<dot2
-            dc.b #<dot3
-            dc.b #<dot4
-            dc.b #<dot5
-            dc.b #<dot6
-
-            align 256
-
-dot0        dc.b %00000000, %00000000
-            dc.b %00001100, %00000000
-            dc.b %00001100, %00000000
-
-dot1        dc.b %00000000, %00000000
-            dc.b %00011000, %00000000
-            dc.b %00011000, %00000000
-
-dot2        dc.b %00000000, %00000000
-            dc.b %00110000, %00000000
-            dc.b %00110000, %00000000
-
-dot3        dc.b %00000000, %00000000
-            dc.b %01100000, %00000000
-            dc.b %01100000, %00000000
-
-dot4        dc.b %00000000, %00000000
-            dc.b %01000000, %00000001
-            dc.b %01000000, %00000001
-
-dot5        dc.b %00000000, %00000000
-            dc.b %00000000, %00000011
-            dc.b %00000000, %00000011
-
-dot6        dc.b %00000000, %00000000
-            dc.b %00000000, %00000110
-            dc.b %00000000, %00000110
+;
+; table of 128 sine values from [0, PI / 2)
+;
+;   for (uint32_t i = 0; i < 128; ++i)
+;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+;
+sine_table  hex 000306090c0f1215
+            hex 191c1f2225282b2e
+            hex 3135383b3e414447
+            hex 4a4d505356595c5f
+            hex 6164676a6d707375
+            hex 787b7e808386888b
+            hex 8e909395989b9d9f
+            hex a2a4a7a9abaeb0b2
+            hex b5b7b9bbbdbfc1c3
+            hex c5c7c9cbcdcfd1d3
+            hex d4d6d8d9dbdddee0
+            hex e1e3e4e6e7e8eaeb
+            hex ecedeeeff1f2f3f4
+            hex f4f5f6f7f8f9f9fa
+            hex fbfbfcfcfdfdfefe
+            hex feffffffffffffff
 
             align 256
 
@@ -3180,4 +3067,5 @@ hires_table_hi
             hex 23272b2f33373b3f
             hex 23272b2f33373b3f
 
+            include applz.logo.s
             include applz.data.s
