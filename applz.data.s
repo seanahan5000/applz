@@ -12,87 +12,92 @@ logos_hi        dc.b #>logo_a
                 dc.b #>logo_z
 
 logo_a          hex 000000
-                hex 542A55
-                hex 542A55
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 542A50
-                hex 542A55
-                hex 542A55
-                hex 542A55
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
-                hex 140050
+                hex 000000
+                hex 552A15
+                hex 552A15
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 550214
+                hex 552A15
+                hex 552A15
+                hex 552A15
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 050014
+                hex 000000
                 hex 000000
 
 logo_p0         hex 00000000
-                hex A0D5AA85
-                hex A0D5AA85
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0818085
-                hex A0D58285
-                hex A0D5AA85
-                hex A0D5AA85
-                hex A0D5AA85
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
-                hex A0810000
+                hex 00000000
+                hex A8D5AA81
+                hex A8D5AA81
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A880A081
+                hex A895A081
+                hex A8D5AA81
+                hex A8D5AA81
+                hex A8D5AA81
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex A8800000
+                hex 00000000
                 hex 00000000
 
 logo_p1         hex 000000
+                hex 000000
                 hex 552A15
                 hex 552A15
                 hex 050014
@@ -109,7 +114,7 @@ logo_p1         hex 000000
                 hex 050014
                 hex 050014
                 hex 050014
-                hex 550A14
+                hex 550214
                 hex 552A15
                 hex 552A15
                 hex 552A15
@@ -132,8 +137,10 @@ logo_p1         hex 000000
                 hex 050000
                 hex 050000
                 hex 000000
+                hex 000000
 
 logo_l          hex 00
+                hex 00
                 hex A8
                 hex A8
                 hex A8
@@ -172,29 +179,32 @@ logo_l          hex 00
                 hex A8
                 hex A8
                 hex 00
+                hex 00
 
-logo_z          hex 000000
-                hex 28552A
-                hex 28552A
-                hex 000028
-                hex 000028
-                hex 00000A
-                hex 00000A
-                hex 004002
-                hex 004002
-                hex 005000
-                hex 005000
-                hex 001400
-                hex 001400
-                hex 000500
-                hex 000500
-                hex 200100
-                hex 200100
-                hex 280000
-                hex 280000
-                hex 28552A
-                hex 28552A
-                hex 000000
+logo_z          hex 00000000
+                hex 00000000
+                hex 20552A01
+                hex 20552A01
+                hex 00002001
+                hex 00002001
+                hex 00002800
+                hex 00002800
+                hex 00000A00
+                hex 00000A00
+                hex 00400200
+                hex 00400200
+                hex 00500000
+                hex 00500000
+                hex 00140000
+                hex 00140000
+                hex 00050000
+                hex 00050000
+                hex 20010000
+                hex 20010000
+                hex 20552A01
+                hex 20552A01
+                hex 00000000
+                hex 00000000
 
 
 appl_heights    dc.b 5,5,6,6,7,7,0,0

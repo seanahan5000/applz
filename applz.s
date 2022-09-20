@@ -189,6 +189,9 @@ start
             dex
             stx high_bcd1
 
+            lda #4
+            jsr reset_logo
+
             jsr clear1
             jsr erase_screen_grid
             jsr draw_logo
@@ -438,7 +441,11 @@ game_over   subroutine
 
             jsr draw_game_over
 
-.1          lda keyboard
+            lda #128
+            jsr reset_logo
+
+.1          jsr animate_logo
+            lda keyboard
             bpl .2
             and #$5f            ; force upper case and remove high bit
             bit unstrobe
@@ -468,7 +475,10 @@ game_over   subroutine
             txa
             bpl .1
 
-.to_restart jmp restart
+.to_restart jsr abort_logo
+.3          jsr animate_logo
+            bcs .3
+            jmp restart
 
 ;=======================================
 ; Aiming mode
@@ -496,8 +506,6 @@ aiming_mode subroutine
 
             lda #$80
             sta angle
-            ; lda #0
-            ; sta button_up
             bit unstrobe
 
 .loop1      jsr update_angle
@@ -512,11 +520,13 @@ aiming_mode subroutine
 
             jsr draw_dots
 
-.loop2      lda keyboard
+.loop2      jsr animate_logo
+
+            lda keyboard
             bpl .1
             bit unstrobe
             and #$5f            ; force upper case and remove high bit
-            beq .0              ; <space> forced to upper case
+            beq .running        ; <space> forced to upper case
             ldx #0
             cmp #"K"
             beq .new_mode
@@ -531,7 +541,7 @@ aiming_mode subroutine
             beq .key_right
             cmp #$0d            ; return
             bne .1
-.0          jmp running_mode
+            beq .running        ; always
 
 .new_mode   stx input_mode
             txa
@@ -548,7 +558,7 @@ aiming_mode subroutine
             bpl .2
             stx pbutton0_prev
             txa
-            bmi running_mode    ; if newly down, start running
+            bmi .running        ; if newly down, start running
 .2          ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #min_angle      ; clamp value to [2,253]
@@ -578,6 +588,11 @@ aiming_mode subroutine
             jsr erase_dots
             jsr random          ; update random number on input change
             jmp .loop1
+
+.running    jsr abort_logo
+.5          jsr animate_logo
+            bcs .5
+            ; fall through
 
 ;=======================================
 ; Running mode
@@ -1540,10 +1555,9 @@ erase_screen_grid subroutine
 
             ; draw filled bar on top/left of grid
 
-            lda #$f8
+            lda #$78
             sta (screenl),y
             iny
-
             lda #$7f
             bne .3              ; always
 
@@ -2411,6 +2425,165 @@ eor_appl    subroutine
 
 ;-------------------------------------------------------------------------------
 ;-------------------------------------------------------------------------------
+
+sine_step   =   8
+delay_step  =   4
+
+; on exit:
+;   sec: animation running
+;   clc: animation complete
+;
+animate_logo subroutine
+
+            ldx #4
+.1          lda logo_bounce,x
+            bne .2
+            dex
+            bpl .1
+            clc                 ; logo complete
+            rts
+
+.2          ldx #4
+.3          lda logo_delay,x
+            beq .4
+            dec logo_delay,x
+            bpl .9              ; always
+
+.4          lda logo_bounce,x
+            beq .9
+
+            lda logo_yind,x
+            ldy logo_dyind,x
+            bmi .5
+            clc
+            adc #sine_step
+            tay
+            sta logo_yind,x
+            bpl .7
+            sec
+            sbc #sine_step*2
+            sta logo_yind,x
+            tay
+            bpl .6              ; always
+
+.5          sec
+            sbc #sine_step
+            sta logo_yind,x
+            tay
+            bpl .7
+            clc
+            adc #sine_step*2
+            sta logo_yind,x
+            tay
+
+            lda #0
+            dec logo_bounce,x
+            beq .8
+
+            lda logo_dyoff,x
+            eor #$ff
+            sta logo_dyoff,x
+
+.6          lda logo_dyind,x
+            eor #$ff
+            sta logo_dyind,x
+.7          lda sine_table,y
+            lsr
+            lsr
+            lsr
+            lsr
+            eor logo_dyoff,x
+            sec
+            sbc logo_dyoff,x
+.8          sta logo_yoff,x
+.9          dex
+            bpl .3
+            jsr draw_logo
+            sec                 ; logo running
+            rts
+
+; on entry:
+;   A: bounce count (max #128)
+;
+reset_logo  subroutine
+
+            asl
+            sec
+            sbc #1
+            ldx #4
+.1          sta logo_bounce,x
+            dex
+            bpl .1
+
+            ldx #4
+            lda #0
+            clc
+.2          sta logo_delay,x
+            adc #delay_step
+            dex
+            bpl .2
+
+            ldx #4
+            lda #0
+.3          sta logo_yind,x
+            sta logo_dyind,x
+            sta logo_yoff,x
+            dex
+            bpl .3
+
+            ldx #4
+            lda #$ff
+.4          sta logo_dyoff,x
+            dex
+            bpl .4
+            rts
+
+abort_logo  subroutine
+
+            ldx #4
+.1          lda logo_bounce,x
+            beq .2
+            lda #1
+            sta logo_bounce,x
+.2          dex
+            bpl .1
+            rts
+
+logo_delay  dc.b delay_step*0
+            dc.b delay_step*1
+            dc.b delay_step*2
+            dc.b delay_step*3
+            dc.b delay_step*4
+
+logo_bounce dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+
+logo_yind   dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+
+logo_dyind  dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+
+logo_yoff   dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+            dc.b 0
+
+logo_dyoff  dc.b $ff
+            dc.b $ff
+            dc.b $ff
+            dc.b $ff
+            dc.b $ff
 ;
 ; draw entire Applz logo
 ;
@@ -2445,7 +2618,7 @@ draw_logo_letter subroutine
             sta .xend_mod+1
             lda logo_tops,x
             clc
-            adc logo_yoffs,x
+            adc logo_yoff,x
             tay
             clc
             adc logo_heights,x
@@ -2469,24 +2642,19 @@ draw_logo_letter subroutine
             bne .1
             rts
 
-logo_yoffs  dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-            dc.b 0
-
-logo_tops   dc.b 35+0
-            dc.b 35+17
-            dc.b 35+17
-            dc.b 35
-            dc.b 35+17
+logo_top    =   34
+logo_tops   dc.b logo_top+0
+            dc.b logo_top+17
+            dc.b logo_top+17
+            dc.b logo_top
+            dc.b logo_top+17
 
 logo_heights
-            dc.b 39
-            dc.b 57-17
-            dc.b 57-17
-            dc.b 39
-            dc.b 39-17
+            dc.b 41
+            dc.b 59-17
+            dc.b 59-17
+            dc.b 41
+            dc.b 41-17
 
 logo_lefts  dc.b 1
             dc.b 4
@@ -2498,7 +2666,7 @@ logo_widths dc.b 3
             dc.b 4
             dc.b 3
             dc.b 1
-            dc.b 3
+            dc.b 4
 
 ;-------------------------------------------------------------------------------
 
@@ -2538,15 +2706,15 @@ game_over_image
             hex C0AAD5AAD5AAD5AAD5AAD5AA81
             hex D0AAD5AAD5AAD5AAD5AAD5AA85
             hex D082000000000000000000A085
-            hex D0000000000000000000000085
-            hex D0001E1E333F001E333F1F0085
-            hex D00033333F3300333333330085
-            hex D00003333F0300333303330085
-            hex D0003B3F330F0033331F1F0085
-            hex D0003333330300333303330085
-            hex D0003333333300331E33330085
-            hex D0001E33333F001E0C3F330085
-            hex D0000000000000000000000085
+            hex D0800000000000000000008085
+            hex D0801E1E333F001E333F1F8085
+            hex D08033333F3300333333338085
+            hex D08003333F0300333303338085
+            hex D0803B3F330F0033331F1F8085
+            hex D0803333330300333303338085
+            hex D0803333333300331E33338085
+            hex D0801E33333F001E0C3F338085
+            hex D0800000000000000000008085
             hex D082000000000000000000A085
             hex D0AAD5AAD5AAD5AAD5AAD5AA85
             hex C0AAD5AAD5AAD5AAD5AAD5AA81
