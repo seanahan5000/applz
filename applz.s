@@ -1,15 +1,30 @@
-
-; ./dasm applz.s -lapplz.lst -f3 -oapplz
+; Applz -- Copyright 2022-2023, Sean Callahan
 
             processor 6502
 
-            mac assume
-                if ({1})
-                else
-                    echo "Assumption failed: " {1}
-                    err
-                endif
-            endm
+        mac ASSUME
+            if ({1})
+            else
+                echo "Assumption failed: ", {1}
+                err
+            endif
+        endm
+
+; NOTE: SET_PAGE and CHECK_PAGE are used to confirm that a branch
+;   in a performance critical loop isn't costing an extra cycle
+
+    mac SET_PAGE
+PAGE set *
+    endm
+
+    mac CHECK_PAGE
+        if ((*-1)/256) != (PAGE/256)
+            ; echo "### page crossing detected:",*,"-^",PAGE
+            ; err
+        endif
+    endm
+
+            include trace.s
 
 ; constants
 
@@ -36,10 +51,10 @@ grid_border_height  = 2
 
 max_aim_dots        = 32
 
-wave_x              = 4     ; in bytes
+wave_x              = 3     ; in bytes
 wave_y              = 192-24
 high_x              = wave_x
-high_y              = wave_y+9
+high_y              = wave_y+8
 
 throttle_applz      = 16    ; under this ball count, add delay
 
@@ -53,7 +68,7 @@ default_start_y     = 192-ball_height-8
 min_angle           = 6
 max_angle           = 255-min_angle
 
-text_height         = 7     ; excluding line gaps
+text_height         = 6     ; excluding line gaps
 
 ; zero page variables
 
@@ -66,6 +81,7 @@ textl           = $04
 texth           = $05
 text_index      = $06
 text_length     = $07
+top_digit       = $08
 
 input_mode      = $10   ; 0: keyboard, 1: paddle
 difficulty      = $11
@@ -76,24 +92,26 @@ appl_index      = $14
 
 dot_count       = $15
 dot_repeat      = $16
+dot_phase       = $17
+prev_dot_count  = $18
 
-angle           = $17
-angle_dx_frac   = $18
-angle_dx_int    = $19
-angle_dy_frac   = $1a
-angle_dy_int    = $1b
+angle           = $19
+angle_dx_frac   = $1a
+angle_dx_int    = $1b
+angle_dy_frac   = $1c
+angle_dy_int    = $1d
 
-pbutton0_prev   = $1c   ; paddle 0 button value from previous check
+pbutton0_prev   = $20   ; paddle 0 button value from previous check
 
-start_x         = $1d   ; variable position relative to grid edge
-send_countdown  = $1e
+start_x         = $21   ; variable position relative to grid edge
+send_countdown  = $22
 
-appl_count      = $1f   ; total number of applz the player has collected
+appl_count      = $23   ; total number of applz the player has collected
 
-screenl         = $20
-screenh         = $21
-seed0           = $22
-seed1           = $23
+screenl         = $24
+screenh         = $25
+seed0           = $26
+seed1           = $27
 
 ball_x          = $28
 ball_dx         = $29
@@ -115,6 +133,10 @@ block_left      = $39
 block_mid       = $3a
 block_bot       = $3b
 
+block_hit0      = $3c
+block_hit1      = $3d
+block_appl_hit  = $3e
+
 wave_index      = $40
 wave_bcd0       = $41
 wave_bcd1       = $42
@@ -129,6 +151,13 @@ applz_ready_bcd0 = $48
 applz_ready_bcd1 = $49
 
 fast_applz      = $4a   ; send applz without throttling
+
+sound_enabled   = $50
+sound_throttle  = $51
+sound_line      = $52
+sound_delay     = $53
+sound_duration  = $54
+sound_count     = $55
 
 ; buffer addresses
 
@@ -159,22 +188,12 @@ pbutton0        = $C061
 PREAD           = $FB1E
 
 ; TODO:
-;   * during title animation, don't allow aiming
-;   - sound + disable toggle UI
-;       - review Ballz sound effects
-;       - ball/wall bounce
-;       - ball/block bounce
-;       - block removed
-;       - apple collected
-;       - title screen tune
-;       - game over sound
-;       - block animation sound
-;   - intro animation (CALLACO presents...)
-;   - new game block animation
+;   * MIT license header on files
+;   * README file, including screen capture image, instructions, trivia
+;   * use command key to jump larger in keyboard mode
 ;   ? clamp keyboard aiming on edge of screen
-;   ? draw warning line at bottom of screen
-;   ? block counts > 255
 ;   ? difficulty setting
+;       - shorten up aiming dots for more difficulty
 
             org $6000
 
@@ -190,33 +209,21 @@ start
             inx
             stx input_mode          ; paddle mode by default
 
-;           ldx #1
+;           ldx #1                  ; normal difficulty
             stx difficulty
 
 ;           ldx #1
+            stx sound_enabled
             stx high_index
             stx high_bcd0
             dex
             stx high_bcd1
 
-            lda #4
-            jsr reset_logo
+            jsr init_sound
+            jsr title_screen
 
-            jsr clear1
-            jsr erase_screen_grid
-
-            jsr block_fill_test
-
-            jsr draw_logo
-            jsr draw_wave_high
-
-            sta primary
-            sta fullscreen
-            sta hires
-            sta graphics
-
-restart     jsr clear_grid
-            ;jsr erase_screen_grid
+restart     jsr open_screen_grid
+            jsr clear_grid
 
             ldx #1
             stx wave_bcd0
@@ -230,81 +237,13 @@ restart     jsr clear_grid
             sta start_x
             jmp first_wave_mode
 
-; TODO: move this code down lower in file
-
-clear_grid  subroutine
-
-            lda #grid_height
-            sta grid_row
-            ldy #0
-.loop1      lda #block_type_edge
-            sta block_grid,y
-            sta block_grid+grid_width-1,y
-            lda #0
-            sta block_counts,y
-            iny
-            ldx #grid_width-2
-.loop2      sta block_grid,y
-            sta block_counts,y
-            iny
-            dex
-            bne .loop2
-            sta block_counts,y
-            iny
-            dec grid_row
-            bne .loop1
-            rts
-;
-; scroll down grid block and block count tables
-;
-scroll_blocks subroutine
-
-            ldy #grid_size-grid_width-1
-.loop1      lda block_grid,y
-            sta block_grid+grid_width,y
-            lda block_counts,y
-            sta block_counts+grid_width,y
-            dey
-            bpl .loop1
-
-            ldy #grid_width-2
-            lda #0
-.loop2      sta block_grid,y
-            sta block_counts,y
-            dey
-            bne .loop2
-            rts
-;
-; find the highest empty line and use that +1 to compute the line
-;   that balls complete at
-;
-compute_max_ball_y subroutine
-
-            ldy #grid_size-2
-.1          ldx #grid_width-2
-.2          lda block_grid,y
-            bne .3
-            dey
-            dex
-            bne .2
-            dey
-            dey
-            bpl .1
-            ldy #0
-.3          lda grid_screen_rows+grid_width,y
-            clc
-            adc #block_height
-            cmp #192-ball_height-text_height
-            bcc .4
-            lda #192-ball_height-text_height
-.4          sta max_ball_y
-            rts
-
 ;=======================================
 ; Wave mode
 ;=======================================
 
 next_wave_mode subroutine
+            jsr play_wave_done
+
             ldx wave_index
             cpx #255            ; cap wave at 255
             bcs .1
@@ -350,15 +289,16 @@ first_wave_mode subroutine
 
             ; draw wave number
 
-            ldx #wave_x+5
+            ldx #wave_x+7
             ldy #wave_y
             jsr set_text_xy
             ldx wave_bcd1
             lda wave_bcd0
             jsr draw_digits3
 
-            ; draw highest wave number
-            ldx #high_x+5
+            ; draw best wave number
+
+            ldx #high_x+7
             ldy #high_y
             jsr set_text_xy
             ldx high_bcd1
@@ -373,6 +313,7 @@ first_wave_mode subroutine
             iny
             lda #block_type_appl
             sta block_grid,y
+            jsr set_block_bit
             jsr eor_block_appl
 
             ; get number of blocks to create, from 2 to 7
@@ -404,6 +345,7 @@ first_wave_mode subroutine
 .4          sta block_counts,y
             lda #block_type_square
             sta block_grid,y
+            jsr set_block_bit
             dec block_index
             bne .2
 
@@ -430,39 +372,42 @@ first_wave_mode subroutine
             sty block_index
             lda #0
             sta block_grid,y
+            jsr clear_block_bit
             jsr eor_block_appl
             ldy block_index
 .8          iny
             cpy #grid_size-grid_width-1
             bne .7
 
-            jsr scroll_blocks
+            jsr scroll_grid
             jsr scroll_screen_grid
             jsr compute_max_ball_y
 
-            ; check for game over when blocks in next-to bottom row are non-zero
+            ; game over when blocks in next-to bottom row are non-zero
 
-            ldy #1
-.9          lda block_grid+grid_size-grid_width*2,y
-            bmi game_over
-            iny
-            cpy #grid_width-1
-            bne .9
-            beq aiming_mode     ; always
+            lda block_bits+grid_height-2
+            beq aiming_mode
+            ; fall through
 
 game_over   subroutine
 
             jsr draw_game_over
+            jsr play_game_over
 
             lda #128
             jsr reset_logo
 
 .1          jsr animate_logo
             lda keyboard
-            bpl .2
+            bpl .3
             and #$5f            ; force upper case and remove high bit
             bit unstrobe
-            ldx #0
+            cmp #"S"
+            bne .2
+            jsr toggle_sound
+            jmp .1
+
+.2          ldx #0
             cmp #"K"
             beq .new_mode
             inx
@@ -477,7 +422,7 @@ game_over   subroutine
             beq .to_restart
 
 .new_mode   stx input_mode
-.2          lda input_mode
+.3          lda input_mode
             beq .1
 
 .joy_mode   lda pbutton0
@@ -489,11 +434,9 @@ game_over   subroutine
             bpl .1
 
 .to_restart jsr abort_logo
-.3          jsr animate_logo
-            bcs .3
-
-            jsr block_fill_test
-
+.4          jsr animate_logo
+            bcs .4
+            jsr close_screen_grid
             jmp restart
 
 ;=======================================
@@ -524,6 +467,11 @@ aiming_mode subroutine
             sta angle
             bit unstrobe
 
+            lda #0
+            sta dot_count
+            lda #2
+            sta dot_phase
+
 .loop1      jsr update_angle
             lda angle_dx_frac
             sta dx_frac
@@ -534,16 +482,20 @@ aiming_mode subroutine
             lda angle_dy_int
             sta dy_int
 
-            jsr draw_dots
-
-.loop2      jsr animate_logo
+.loop2      jsr update_dots
+            jsr animate_logo
 
             lda keyboard
             bpl .1
             bit unstrobe
             and #$5f            ; force upper case and remove high bit
             beq .running        ; <space> forced to upper case
-            ldx #0
+            cmp #"S"
+            bne .1
+            jsr toggle_sound
+            jmp .2
+
+.1          ldx #0
             cmp #"K"
             beq .new_mode
             inx
@@ -556,7 +508,7 @@ aiming_mode subroutine
             cmp #$15            ; right arrow
             beq .key_right
             cmp #$0d            ; return
-            bne .1
+            bne .2
             beq .running        ; always
 
 .new_mode   stx input_mode
@@ -565,25 +517,25 @@ aiming_mode subroutine
             ldy #$80
             bne .common         ; always
 
-.1          ldx input_mode
+.2          ldx input_mode
             beq .loop2
 
 .joy_mode   lda pbutton0        ; check for paddle 0 button press
             tax
             eor pbutton0_prev
-            bpl .2
+            bpl .3
             stx pbutton0_prev
             txa
             bmi .running        ; if newly down, start running
-.2          ldx #0
+.3          ldx #0
             jsr PREAD           ; read paddle 0 value
             cpy #min_angle      ; clamp value to [2,253]
-            bcs .3
+            bcs .4
             ldy #min_angle
-.3          cpy #max_angle
-            bcc .4
+.4          cpy #max_angle
+            bcc .5
             ldy #max_angle
-.4          cpy angle
+.5          cpy angle
             beq .loop2          ; loop until something changes
             bne .common         ; always
 
@@ -601,13 +553,12 @@ aiming_mode subroutine
             dey
 
 .common     sty angle
-            jsr erase_dots
             jsr random          ; update random number on input change
             jmp .loop1
 
 .running    jsr abort_logo
-.5          jsr animate_logo
-            bcs .5
+.6          jsr animate_logo
+            bcs .6
             ; fall through
 
 ;=======================================
@@ -628,23 +579,57 @@ running_mode subroutine
             sta applz_visible
             sta appl_slots
             sta fast_applz
-            beq .first          ; always
+            RESET_TRACE
+            START_TRACE
+            BEGIN_EVENT Wave
+            BEGIN_EVENT GameLoop
+            jmp .first
 
             ; update and redraw visible applz
 
-.loop1      ldx #0
+.loop1      END_EVENT GameLoop
+            BEGIN_EVENT GameLoop
+            lda #throttle_applz
+            sta sound_throttle
+            ldx #0
 .loop2      stx appl_index
+
+            lda #-1
+            sta block_hit0
+            sta block_hit1
+            sta block_appl_hit
+
+            BEGIN_EVENT Update
             jsr update_appl
+            jsr update_sound
+            END_EVENT Update
+
+            ldy block_hit0
+            bmi .no_block
+            jsr update_block
+            ldy block_hit1
+            bmi .no_block
+            jsr update_block
+.no_block   ldy block_appl_hit
+            bmi .no_apple
+            jsr eor_block_appl
+            jsr play_appl_capture
+.no_apple
             ldx appl_index
             inx
             cpx appl_slots
             bne .loop2
 
             lda keyboard
-            bpl .1
+            bpl .2
             bit unstrobe
             and #$5f            ; force upper case and remove high bit
-            ldx #0
+            cmp #"S"
+            bne .1
+            jsr toggle_sound
+            jmp .2
+
+.1          ldx #0
             cmp #"K"
             beq .new_mode
             inx
@@ -656,7 +641,7 @@ running_mode subroutine
             eor #1
             sta fast_applz
 .new_mode   stx input_mode
-.1          ldx input_mode
+.2          ldx input_mode
             beq .throttle
 
             ; check for throttling ball movement speed
@@ -670,41 +655,44 @@ running_mode subroutine
             stx pbutton0_prev
             ldy #0
             txa
-            bpl .2
+            bpl .3
             iny
-.2          sty fast_applz
+.3          sty fast_applz
 
             ; add delay for low ball counts
             ;   (~600 cycles per ball below throttle_applz)
-
 .throttle   lda fast_applz
             bne .nodelay
-            lda #throttle_applz
-            sec
-            sbc appl_slots
-            bcc .nodelay
+            lda sound_throttle
             beq .nodelay
-            tax
+            BEGIN_EVENT Throttle
 .delay1     ldy #120             ; 120 * 5 cycles
 .delay2     dey
             bne .delay2
-            dex
+            jsr update_sound
+            lda sound_throttle
             bne .delay1
+            END_EVENT Throttle
 .nodelay
-
             lda applz_ready     ; any applz left to send?
-            bne .send
+            bne .try_send
             lda applz_visible   ; any still visible?
-            bne .loop1
+            beq .wave_done
+            jmp .loop1
+.wave_done  END_EVENT GameLoop
+            END_EVENT Wave
+            STOP_TRACE
             jmp next_wave_mode  ; no, start next wave
 
-.send       dec send_countdown  ; check if it has been long enough to send
-            bne .loop1
+.try_send   dec send_countdown  ; check if it has been long enough to send
+            beq .do_send
+            jmp .loop1
 
-            lda #send_delay     ; reset send delay countdown
+.do_send    lda #send_delay     ; reset send delay countdown
             sta send_countdown
 
-.first      ldx appl_slots
+.first      BEGIN_EVENT Send
+            ldx appl_slots
             inc appl_slots
 
             lda start_x         ; set start position
@@ -738,7 +726,9 @@ running_mode subroutine
             sbc #0
             sta applz_ready_bcd1
             cld
-            jsr draw_applz_ready
+            BEGIN_EVENT ApplzReady
+            jsr update_applz_ready
+            END_EVENT ApplzReady
 
             inc applz_visible
 
@@ -746,7 +736,16 @@ running_mode subroutine
             ldx x_int,y
             lda y_int,y
             jsr eor_appl
+            jsr play_ball_send
+
+            jsr update_sound
+            END_EVENT Send
             jmp .loop1
+
+;=======================================
+; End of game loop
+;=======================================
+
 ;
 ; set and convert applz_ready to BCD
 ;
@@ -787,6 +786,11 @@ set_applz_ready subroutine
             rts
 
 draw_applz_ready subroutine
+            clc
+            bcc .0              ; always
+update_applz_ready
+            sec
+.0          php
             ldx start_x
             lda div7,x
             clc
@@ -800,106 +804,17 @@ draw_applz_ready subroutine
 .2          tax
             ldy #192-text_height
             jsr set_text_xy
+            plp
             lda applz_ready
-            beq .3
+            beq .4
             ldx applz_ready_bcd1
             lda applz_ready_bcd0
-            jmp draw_digits3
-.3          jmp draw_spaces3
-
-;
-; draw new aiming dots until edge of screen is hit
-;   (or richochet if difficulty == 0)
-;
-draw_dots   subroutine
-
-            lda #0
-            sta dot_count
-
-            ldx #1
-.loop1      stx appl_index
-
-            ; copy dx and dy from previous dot
-
-            lda x_frac-1,x
-            sta x_frac,x
-            lda x_int-1,x
-            sta x_int,x
-
-            lda y_frac-1,x
-            sta y_frac,x
-            lda y_int-1,x
-            sta y_int,x
-
-            lda dx_frac-1,x
-            sta dx_frac,x
-            lda dx_int-1,x
-            sta dx_int,x
-
-            lda dy_frac-1,x
-            sta dy_frac,x
-            lda dy_int-1,x
-            sta dy_int,x
-
-            lda #4              ; 4 delta steps between dots
-            sta dot_repeat
-
-.loop2      lda x_frac,x
-            clc
-            adc dx_frac,x
-            sta x_frac,x
-            lda x_int,x
-            adc dx_int,x
-            sta x_int,x
-
-            ; check for dot reaching left or right edge of grid
-
-            cmp #21
             bcc .3
-            cmp #grid_screen_width-21-ball_width
-            bcc .4
-.3          lda difficulty
-            bne .exit
-            jsr reflect_x
-.4
-            lda y_frac,x
-            clc
-            adc dy_frac,x
-            sta y_frac,x
-            lda y_int,x
-            adc dy_int,x
-            sta y_int,x
+            jmp update_digits3
+.3          jmp draw_digits3
+.4          jmp erase_digits3
 
-            ; check for hitting top of grid
-
-            cmp #grid_screen_top
-            bcc .exit
-
-            dec dot_repeat
-            bne .loop2
-
-            jsr eor_dot
-
-            ldx appl_index
-            inx
-            stx dot_count
-            cpx #max_aim_dots
-            bne .loop1
-.exit       rts
-;
-; erase all previously drawn aiming dots
-;
-erase_dots  subroutine
-
-            ldx #1
-            bne .2          ; always
-.1          stx appl_index
-            jsr eor_dot
-            ldx appl_index
-            inx
-.2          cpx dot_count
-            bcc .1
-            rts
+;-----------------------------------------------------------
 ;
 ; remove ball off bottom of screen
 ;
@@ -908,6 +823,7 @@ ball_done   subroutine
             ldx ball_x
             lda ball_y
             jsr eor_appl
+            jsr play_ball_done
 
             ldx appl_index
             dec applz_visible
@@ -968,6 +884,11 @@ wave_done   subroutine
             adc #0                  ; +1 to align ball with text
             sta start_x
             rts
+
+;=======================================
+; Apple movement update logic
+;=======================================
+
 ;
 ; update single appl position
 ;
@@ -1035,6 +956,12 @@ update_appl subroutine
 ; reflect ball at top of screen
 
 .reverse_dy jsr reflect_y
+            txa
+            pha
+            lda #0              ; always at top
+            jsr play_wall_hit
+            pla
+            tax
             lda y_int,x
             jmp .post_reverse_d7
 
@@ -1052,7 +979,8 @@ collide_appl
             stx appl_count
 .1          lda #0
             sta block_grid,y
-            jsr eor_block_appl
+            sty block_appl_hit
+            jsr clear_block_bit
             ldx appl_index      ; restore ball index
             jmp move_appl
 ;
@@ -1393,11 +1321,10 @@ diag_down_left subroutine
 ;
 ; on entry:
 ;   x: ball index
-;   y: block index
 ;
 ; on exit:
 ;   x: ball index
-;   y: block index
+;   y: unchanged
 ;
 reflect_x   lda x_frac,x        ; back up to old x
             sec
@@ -1444,40 +1371,56 @@ reflect_y   lda y_frac,x        ; back up to old y
 ; handle hitting a grid block
 ;
 ; on entry:
-;   x: ball index
 ;   y: block index
 ;
 ; on exit:
-;   x: ball index
 ;   y: block index
 ;
 hit_block   subroutine
-
             lda block_counts,y
-            beq .1              ; border blocks have zero count
+            beq .3              ; border blocks have zero count
             sec
             sbc #1
             sta block_counts,y
-            bne .2
-
+            bne .1
             lda #0
             sta block_grid,y
-            sty block_index
+            jsr clear_block_bit
+.1          lda block_hit0
+            bpl .2
+            sty block_hit0
+            rts
+.2          sty block_hit1
+            rts
+.3          sty block_index
+            lda yind_table,y
+            jsr play_wall_hit
+            ldy block_index
+            rts
+;
+; erase or redraw a block that was hit during the update_appl call
+;
+; on entry:
+;   y: block index
+;
+update_block subroutine
+            lda block_counts,y
+            bne .1
             jsr erase_block
             jsr compute_max_ball_y
-            ldx appl_index      ; restore ball index
-            ldy block_index     ; restore block index
-.1          rts
+            jsr play_block_destroyed
+            jmp update_sound
 
-.2          lda block_grid,y
-            sty block_index
+.1          lda yind_table,y
+            pha
+            lda block_grid,y
             jsr draw_game_block
-            ldx appl_index      ; restore ball index
-            ldy block_index     ; restore block index
-            rts
-
+            pla
+            jsr play_block_hit
+            jmp update_sound
+;
 ; divide by 21 table to convert x position into grid column
-; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
+;
             align 256
 grid_x_table
             ds  block_width,0
@@ -1489,9 +1432,9 @@ grid_x_table
             ds  block_width,6
             ds  block_width,7
             ds  block_width,8
-
+;
 ; divide by 20 * grid_width table to convert y position into grid row offset
-; (page aligned so table look-ups don't cost extra cycle for crossing page boundary)
+;
             align 256
 grid_y_table
             ds  block_height+grid_screen_top,0*grid_width
@@ -1504,102 +1447,11 @@ grid_y_table
             ds  block_height,7*grid_width
             ds  block_height,8*grid_width
             ds  block_height,9*grid_width
-;
-; scroll all visible grid blocks down by one on screen
-;
-scroll_screen_grid subroutine
 
-            lda #block_height/scroll_delta
-            sta grid_row
-.loop1      ldx #191
-.loop2      lda hires_table_lo-scroll_delta,x
-            clc
-            adc #grid_screen_left+3
-            sta .mod1+1
-            lda hires_table_hi-scroll_delta,x
-            sta .mod1+2
+;=======================================
+; Aiming dots logic
+;=======================================
 
-            lda hires_table_lo,x
-;           clc
-            adc #grid_screen_left+3
-            sta .mod2+1
-            lda hires_table_hi,x
-            sta .mod2+2
-
-            ldy #(grid_width-2)*3-1
-.mod1       lda $ffff,y
-.mod2       sta $ffff,y
-            dey
-            bpl .mod1
-
-            dex
-            cpx #grid_screen_top+scroll_delta-1
-            bne .loop2
-
-.loop3      lda hires_table_lo,x
-            clc
-            adc #grid_screen_left+3
-            sta .mod3+1
-            lda hires_table_hi,x
-            sta .mod3+2
-            ldy #(grid_width-2)*3-1
-            lda #0
-.mod3       sta $ffff,y
-            dey
-            bpl .mod3
-            dex
-            cpx #grid_screen_top-1
-            bne .loop3
-
-            dec grid_row
-            bne .loop1
-            rts
-;
-; erase the entire screen grid area and draw side bars
-;
-erase_screen_grid subroutine
-
-            ldx #0
-.loop1      lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-
-            ldy #grid_screen_left+2
-            cpx #grid_border_height
-            bcs .2
-
-            ; draw filled bar on top/left of grid
-
-            lda #$78
-            sta (screenl),y
-            iny
-            lda #$7f
-            bne .3              ; always
-
-            ; draw bar on left of grid
-
-.2          lda #$18
-            sta (screenl),y
-            iny
-
-            ; clear main grid
-
-            lda #0
-.3          sta (screenl),y
-            iny
-            cpy #grid_width*3-3+grid_screen_left
-            bne .3
-
-            ; draw bar on right of grid
-
-            lda #$03
-            sta (screenl),y
-
-            inx
-            cpx #192
-            bne .loop1
-            rts
 ;
 ; update aiming angle delta values
 ;
@@ -1659,432 +1511,159 @@ update_angle subroutine
             sta angle_dy_int
             rts
 ;
-; ***
+; table of 128 sine values from [0, PI / 2)
 ;
-block_fill_test subroutine
+;   for (uint32_t i = 0; i < 128; ++i)
+;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
+;
+sine_table  hex 000306090c0f1215
+            hex 191c1f2225282b2e
+            hex 3135383b3e414447
+            hex 4a4d505356595c5f
+            hex 6164676a6d707375
+            hex 787b7e808386888b
+            hex 8e909395989b9d9f
+            hex a2a4a7a9abaeb0b2
+            hex b5b7b9bbbdbfc1c3
+            hex c5c7c9cbcdcfd1d3
+            hex d4d6d8d9dbdddee0
+            hex e1e3e4e6e7e8eaeb
+            hex ecedeeeff1f2f3f4
+            hex f4f5f6f7f8f9f9fa
+            hex fbfbfcfcfdfdfefe
+            hex feffffffffffffff
+;
+; update/animate new aiming dots until edge of screen is hit
+;   (or richochet if difficulty == 0)
+;
+update_dots subroutine
 
-            ldy #0
-.loop1      sty ypos
-            cpy #3
-            bne .1
-            jsr erase_game_over
-            ldy ypos
-.1          jsr fill_grid_row
-            ldy ypos
+            ldy dot_phase
             iny
-            cpy #grid_height
-            bne .loop1
-
-            ldy #0
-.loop2      sty ypos
-            jsr erase_grid_row
-            ldy ypos
-            iny
-            cpy #grid_height
-            bne .loop2
-            rts
-;
-; on entry:
-;   y: grid row
-;
-fill_grid_row subroutine
-            ldx grid_rows+1,y
-            dex
-            stx xpos
             tya
-            lsr
-            lda #$0
-            ror
-            sta block_color
-            lda grid_rows,y
+            and #3
+            sta dot_phase
             tay
             iny
-.loop1      sty block_index
-            jsr draw_title_block
-            ldy block_index
-            iny
-            cpy xpos
-            bne .loop1
-            rts
-;
-; on entry:
-;   y: grid row
-;
-erase_grid_row subroutine
-            ldx grid_rows+1,y
-            dex
-            stx xpos
-            lda grid_rows,y
-            tay
-            iny
-.loop1      sty block_index
-            jsr erase_block
-            ldy block_index
-            iny
-            cpy xpos
-            bne .loop1
-            rts
+            sty dot_repeat
+            lda dot_count
+            sta prev_dot_count
 
-grid_rows   dc.b    grid_width*0
-            dc.b    grid_width*1
-            dc.b    grid_width*2
-            dc.b    grid_width*3
-            dc.b    grid_width*4
-            dc.b    grid_width*5
-            dc.b    grid_width*6
-            dc.b    grid_width*7
-            dc.b    grid_width*8
-            dc.b    grid_width*9
-            dc.b    grid_width*10
-;
-; draw a specific block color/fill level for
-;   title and game start block animation
-;
-; on entry
-;   y: grid index of block
-;   block color: $00 or $80
-;
-draw_title_block subroutine
-            lda #block_height_nogap-2-2
-            sta block_top
-            lda #4*4
-            sta block_mid
-            lda #2-1
-            sta block_bot
-            bpl draw_block      ; always
-;
-; compute block fill level and color, then draw
-;
-; on entry
-;   y: grid index of block
-;   a: block type
-;
-wave_masks  dc.b 0, 1, 3, 7, 15, 31
-wave_shifts dc.b 0, 2, 1, 0, -1, -2
+            ldx #1
+.loop1      cpx dot_count
+            bcs .1
+            stx appl_index
+            jsr eor_dot
+            ldx appl_index
+.1
+            ; copy position and delta from previous dot
 
-draw_game_block  subroutine
+            lda x_frac-1,x
+            sta x_frac,x
+            lda x_int-1,x
+            sta x_int,x
 
-            ldx #$00
-            lda block_counts,y
-            cmp #64
-            bcc .1
-            beq .1
-            ldx #$80
-.1          stx block_color
+            lda y_frac-1,x
+            sta y_frac,x
+            lda y_int-1,x
+            sta y_int,x
 
-            ; compute number of top empty and bottom full lines in block
+            lda dx_frac-1,x
+            sta dx_frac,x
+            lda dx_int-1,x
+            sta dx_int,x
 
-            lda block_counts,y
-            sec
-            sbc #1
-            pha
-            ldx wave_mag
-            beq .3
-.2          lsr
-            dex
-            bne .2
-.3          sta block_bot
-            lda #block_height_nogap-2   ; minus top and bottom line
-            sec
-            sbc block_bot
-            bcs .4
-            lda #block_height_nogap-2   ; minus top and bottom line
-            sta block_bot
-            lda #0
-.4          sta block_top
+            lda dy_frac-1,x
+            sta dy_frac,x
+            lda dy_int-1,x
+            sta dy_int,x
 
-            ; compute number of dots in partial line based on wave magnitude
-
-            pla
-            ldx wave_mag
-            and wave_masks,x
-            sta block_mid
-            lda wave_shifts,x
-            tax
-            bpl .6
-.5          lsr block_mid
-            inx
-            bmi .5
-.6          lda block_mid
-.7          dex
-            bmi .8
-            asl
-            bcc .7             ; always
-.8          asl
-            asl
-            sta block_mid
-            beq .9
-            dec block_top
-.9          ; fall through
-;
-; on entry
-;   y: grid index of block
-;   block_top, block_mid, block_bot, block_color set up
-;
-; xpos is unchanged
-;
-draw_block  subroutine
-            ldx grid_screen_rows,y
-            lda grid_screen_cols,y
-            tay
-
-            ; first full line
-            lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            inx
-            lda #$55
-            ora block_color
-            sta (screenl),y
-            iny
-            lda #$2a
-            ora block_color
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            and #$60
-            ora #$15
-            ora block_color
-            sta (screenl),y
-            dey
-            dey
-
-            ; top empty lines
-            lda block_top
-            beq .2
-.1          cpx #192
-            beq .21
-            lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            inx
-            lda #$01
-            ora block_color
-            sta (screenl),y
-            iny
-            lda block_color
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            and #$60
-            ora #$10
-            ora block_color
-            sta (screenl),y
-            dey
-            dey
-            dec block_top
-            bne .1
-.2
-            ; partial line
-            lda block_mid
-            beq .3
-            cpx #192
-.21         beq .41
-            lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            inx
-            txa
-            pha
-            ldx block_mid
-            lda block_lines+0,x
-            ora block_color
-            sta (screenl),y
-            iny
-            lda block_lines+1,x
-            ora block_color
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            and #$60
-            ora block_lines+2,x
-            ora block_color
-            sta (screenl),y
-            dey
-            dey
-            pla
-            tax
-.3
-            ; bottom full lines
-.4          cpx #192
-.41         beq .5
-            lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            inx
-            lda #$55
-            ora block_color
-            sta (screenl),y
-            iny
-            lda #$2a
-            ora block_color
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            and #$60
-            ora #$15
-            ora block_color
-            sta (screenl),y
-            dey
-            dey
-            dec block_bot
-            bpl .4              ; draw bottom line by letting count go negative
-.5          rts
-
-block_lines hex 01001000        ; 0 (empty)
-            hex 05001000        ; 1
-            hex 15001000        ; 2
-            hex 55001000        ; 3
-            hex 55021000        ; 4
-            hex 550a1000        ; 5
-            hex 552a1000        ; 6
-            hex 552a1100        ; 7
-            hex 552a1500        ; 8 (full)
-;
-; erase a single grid block
-;
-; on entry
-;   y: grid index of block
-;
-erase_block subroutine
-
-            lda grid_screen_rows,y
-            tax
+.loop2      lda x_frac,x
             clc
-            adc #block_height_nogap
-            cmp #192
-            bcc .1
-            lda #192
-.1          sta block_bot
-            lda grid_screen_cols,y
-            tay
-.loop       lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            lda #0
-            sta (screenl),y
-            iny
-            sta (screenl),y
-            iny
-            lda (screenl),y
-            and #$60            ; clip out block gap
-            sta (screenl),y
-            dey
-            dey
-            inx
-            cpx block_bot
-            bne .loop
-            rts
-;
-; draw an in-grid appl shape
-;
-; on entry
-;   y: grid index of block
-;
-eor_block_appl subroutine
+            adc dx_frac,x
+            sta x_frac,x
+            lda x_int,x
+            adc dx_int,x
+            sta x_int,x
 
-block_appl_height = 9
+            ; check for dot reaching left or right edge of grid
 
-            lda grid_screen_rows,y
+            cmp #21
+            bcc .3
+            cmp #grid_screen_width-21-ball_width
+            bcc .4
+.3          lda difficulty
+            bne .5
+            jsr reflect_x
+.4
+            lda y_frac,x
             clc
-            adc #(block_height_nogap-block_appl_height)/2
-            sta block_top
-;           clc
-            adc #block_appl_height
-            sta block_bot
+            adc dy_frac,x
+            sta y_frac,x
+            lda y_int,x
+            adc dy_int,x
+            sta y_int,x
 
-            lda grid_screen_cols,y
-            sta block_left
-;           clc
-            adc #block_width/7
-            sta block_mid
+            ; check for hitting top of grid
 
-            ; choose shifted or non-shifted shape based on column
+            cmp #grid_screen_top
+            bcc .5
 
-            ldx #0
-            lda block_left
-            lsr
-            bcs .noshift
-            ldx #block_appl_height*(block_width/7)
-.noshift
-            ldy block_top
-.loop1      lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-            ldy block_left
-.loop2      lda block_appl_shapes,x
-            eor (screenl),y
-            sta (screenl),y
+            dec dot_repeat
+            bpl .loop2
+
+            lda #3
+            sta dot_repeat
+
+            stx appl_index
+            jsr eor_dot
+            ldx appl_index
+
             inx
-            iny
-            cpy block_mid
-            bne .loop2
-            ldy block_top
-            iny
-            sty block_top
-            cpy block_bot
-            bne .loop1
+            cpx #max_aim_dots
+            bcs .5
+            stx appl_index
+            jmp .loop1
+
+.5          stx dot_count
+.6          inx
+            cpx prev_dot_count
+            bcs .7
+            stx appl_index
+            jsr eor_dot
+            ldx appl_index
+            bne .6              ; always
+
+; throttle to maximum number of dots
+
+.7          lda #max_aim_dots
+            sec
+            sbc dot_count
+            tax
+            beq .10
+.8          ldy #880/5          ; burn about 880 cycles per dot
+.9          dey
+            bne .9
+            dex
+            bne .8
+.10         rts
+
+;
+; erase all previously drawn aiming dots
+;
+erase_dots  subroutine
+
+            ldx #1
+            bne .2          ; always
+.1          stx appl_index
+            jsr eor_dot
+            ldx appl_index
+            inx
+.2          cpx dot_count
+            bcc .1
             rts
-
-block_appl_shapes
-            dc.b %00000000, %00101000, %00000000
-            dc.b %00000000, %00001000, %00000000
-            dc.b %00000000, %00101010, %00000000
-            dc.b %11000000, %10101010, %10000001
-            dc.b %11000000, %10101010, %10000000
-            dc.b %00000000, %01010101, %00000000
-            dc.b %11000000, %10101010, %10000000
-            dc.b %11000000, %10101010, %10000001
-            dc.b %10000000, %11010101, %10000000
-
-            dc.b %00000000, %00010100, %00000000
-            dc.b %00000000, %00000100, %00000000
-            dc.b %00000000, %00010101, %00000000
-            dc.b %10100000, %11010101, %10000000
-            dc.b %10100000, %10010101, %10000000
-            dc.b %01000000, %00101010, %00000000
-            dc.b %10100000, %10010101, %10000000
-            dc.b %10100000, %11010101, %10000000
-            dc.b %11000000, %10101010, %10000000
-
-            assume grid_height=10
-            assume block_height=20
-
-grid_screen_rows
-            ds  grid_width,grid_screen_top+0
-            ds  grid_width,grid_screen_top+20
-            ds  grid_width,grid_screen_top+40
-            ds  grid_width,grid_screen_top+60
-            ds  grid_width,grid_screen_top+80
-            ds  grid_width,grid_screen_top+100
-            ds  grid_width,grid_screen_top+120
-            ds  grid_width,grid_screen_top+140
-            ds  grid_width,grid_screen_top+160
-            ds  grid_width,grid_screen_top+180
-
-            assume grid_screen_left=14
-            assume block_width=21
-
-grid_screen_cols
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
-            dc.b 14,17,20,23,26,29,32,35,38
 ;
 ; eor a single aiming dot shape
-;*** GROUP THIS WITH AIMING CODE ***
 ;
 eor_dot     subroutine
 
@@ -2159,10 +1738,9 @@ dot6        dc.b %00000000, %00000000
             dc.b %00000000, %00000110
             dc.b %00000000, %00000110
 
-;-------------------------------------------------------------------------------
-;-------------------------------------------------------------------------------
-
-;**** COMMENTS EXPLAINING WHAT ALL OF THIS IS DOING ***
+;=======================================
+; Fast apple redrawing code
+;=======================================
 
 ; eor move:
 ;
@@ -2173,6 +1751,8 @@ dot6        dc.b %00000000, %00000000
 ; simple erase/draw:
 ;
 ;   373 * 2 = 746
+
+            align 256               ; to prevent page crossings
 
 hit_move_appl subroutine
 
@@ -2197,6 +1777,7 @@ hit_move_appl_ul subroutine
             jsr hit_block
 
 move_appl_ul subroutine
+            BEGIN_EVENT MoveUL
 
             lda ball_x              ; 3
             sec                     ; 2
@@ -2244,6 +1825,9 @@ move_appl_ul subroutine
             ldy ball_dy             ; 3     y/dy
                                     ; = 93
 
+            ; TODO: update_sound call?
+
+            SET_PAGE
 .loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
@@ -2264,14 +1848,17 @@ move_appl_ul subroutine
             sty ball_dy             ; 3     y/dy
             cpy ycount              ; 3
             bne .loop               ; 3/2
+            CHECK_PAGE
                                     ; = 67 (340/407/474)
-.exit       rts                     ; 6
+.exit       END_EVENT MoveUL
+            rts
 
 hit_move_appl_ur subroutine
 
             jsr hit_block
 
 move_appl_ur subroutine
+            BEGIN_EVENT MoveUR
 
             lda ball_dx             ; 3
             sec                     ; 2
@@ -2321,6 +1908,9 @@ move_appl_ur subroutine
             ldy ball_dy             ; 3     y/dy
                                     ; = 96
 
+            ; TODO: update_sound call?
+
+            SET_PAGE
 .loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
@@ -2341,8 +1931,10 @@ move_appl_ur subroutine
             sty ball_dy             ; 3     y/dy
             cpy ycount              ; 3
             bne .loop               ; 3/2
+            CHECK_PAGE
                                     ; = 67 (340/407/474)
-.exit       rts                     ; 6
+.exit       END_EVENT MoveUR
+            rts
 
 move_down   lda ball_dx             ; 3
             cmp ball_x              ; 3
@@ -2354,6 +1946,7 @@ hit_move_appl_dl subroutine
             jsr hit_block
 
 move_appl_dl subroutine
+            BEGIN_EVENT MoveDL
 
             lda ball_x              ; 3     ((dx * 4) + dy) * 2 + ur_dl
             sec                     ; 2
@@ -2364,7 +1957,7 @@ move_appl_dl subroutine
             adc ball_dy             ; 3
             sec                     ; 2
             sbc ball_y              ; 3
-            beq .exit               ; 2/3   no movement
+            beq .exit               ; 2/3   no movement (remove for sound eveness?)
             asl                     ; 2
 ;           clc
             adc #1                  ; 3     + ur_dl
@@ -2403,6 +1996,9 @@ move_appl_dl subroutine
             ldy ball_y              ; 3     y/dy
                                     ; = 96
 
+            ; TODO: update_sound call?
+
+            SET_PAGE
 .loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
@@ -2423,14 +2019,17 @@ move_appl_dl subroutine
             sty ball_y              ; 3     y/dy
             cpy ycount              ; 3
             bne .loop               ; 3/2
+            CHECK_PAGE
                                     ; = 67 (340/407/474)
-.exit       rts                     ; 6
+.exit       END_EVENT MoveDL
+            rts
 
 hit_move_appl_dr subroutine
 
             jsr hit_block
 
 move_appl_dr subroutine
+            BEGIN_EVENT MoveDR
 
             lda ball_dx             ; 3     ((dx * 4) + dy) * 2
             sec                     ; 2
@@ -2441,7 +2040,7 @@ move_appl_dr subroutine
             adc ball_dy             ; 3
             sec                     ; 2
             sbc ball_y              ; 3
-            beq .exit               ; 2/3
+            beq .exit               ; 2/3   no movement (remove for sound eveness?)
             asl                     ; 2
 
             tay                     ; 2
@@ -2478,6 +2077,9 @@ move_appl_dr subroutine
             ldy ball_y              ; 3     y/dy
                                     ; = 93
 
+            ; TODO: update_sound call?
+
+            SET_PAGE
 .loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
@@ -2498,9 +2100,12 @@ move_appl_dr subroutine
             sty ball_y              ; 3     y/dy
             cpy ycount              ; 3
             bne .loop               ; 3/2
+            CHECK_PAGE
                                     ; = 67 (340/407/474)
-.exit       rts                     ; 6
+.exit       END_EVENT MoveDR
+            rts
 
+            align 256               ; to prevent page crossings
 ;-------------------------------------------------------------------------------
 ;
 ; eor a ball shape without movement
@@ -2510,6 +2115,7 @@ move_appl_dr subroutine
 ;   A: y coordinate
 ;
 eor_appl    subroutine
+            BEGIN_EVENT EorBall
 
             sta ball_y
             clc
@@ -2533,6 +2139,8 @@ eor_appl    subroutine
 
             ldx #0
             ldy ball_y
+
+            SET_PAGE
 .loop       lda hires_table_lo,y    ; 4
             sta screenl             ; 3
             lda hires_table_hi,y    ; 4
@@ -2553,519 +2161,16 @@ eor_appl    subroutine
             sty ball_y              ; 3
             cpy ycount              ; 3
             bne .loop               ; 3/2
-.exit       rts
+            CHECK_PAGE
 
-;-------------------------------------------------------------------------------
-
-game_over_top = 64
-game_over_bottom = 82
-game_over_left = 20
-game_over_right = 35
-
-draw_game_over subroutine
-            ldx #0
-            ldy #game_over_top
-.1          sty ypos
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-            ldy #game_over_left
-            lda #0
-            sta (screenl),y
-            iny
-.2          lda game_over_image,x
-            sta (screenl),y
-            inx
-            iny
-            cpy #game_over_right-1
-            bne .2
-            lda #0
-            sta (screenl),y
-            ldy ypos
-            iny
-            cpy #game_over_bottom
-            bne .1
+.exit       END_EVENT EorBall
             rts
 
-erase_game_over subroutine
-            ldx #game_over_top
-.1          lda hires_table_lo,x
-            sta screenl
-            lda hires_table_hi,x
-            sta screenh
-            ldy #game_over_left
-            lda #0
-.2          sta (screenl),y
-            iny
-            cpy #game_over_right
-            bne .2
-            inx
-            cpx #game_over_bottom
-            bne .1
-            rts
+;=======================================
+; End of fast apple redrawing code
+;=======================================
 
-game_over_image
-            hex 00000000000000000000000000
-            hex C0AAD5AAD5AAD5AAD5AAD5AA81
-            hex D0AAD5AAD5AAD5AAD5AAD5AA85
-            hex D082000000000000000000A085
-            hex D0800000000000000000008085
-            hex D0801E1E333F001E333F1F8085
-            hex D08033333F3300333333338085
-            hex D08003333F0300333303338085
-            hex D0803B3F330F0033331F1F8085
-            hex D0803333330300333303338085
-            hex D0803333333300331E33338085
-            hex D0801E33333F001E0C3F338085
-            hex D0800000000000000000008085
-            hex D082000000000000000000A085
-            hex D0AAD5AAD5AAD5AAD5AAD5AA85
-            hex C0AAD5AAD5AAD5AAD5AAD5AA81
-            hex 00000000000000000000000000
-            hex 00000000000000000000000000
-
-;-------------------------------------------------------------------------------
-
-draw_wave_high subroutine
-
-            ldx #0
-            ldy #wave_y
-.1          sty ypos
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-            ldy #wave_x
-.2          lda wave_high_image,x
-            sta (screenl),y
-            inx
-            iny
-            cpy #wave_x+5
-            bne .2
-            ldy ypos
-            iny
-            cpy #wave_y+16
-            bne .1
-            rts
-
-wave_high_image
-            hex 331E333F00
-            hex 333333330C
-            hex 333333030C
-            hex 333F330F00
-            hex 3F3333030C
-            hex 3F331E330C
-            hex 33330C3F00
-            hex 0000000000
-            hex 0000000000
-            hex 331E1E3300
-            hex 330C33330C
-            hex 330C03330C
-            hex 3F0C3B3F00
-            hex 330C33330C
-            hex 330C33330C
-            hex 331E1E3300
-
-;-------------------------------------------------------------------------------
-;
-; set next location to draw text
-;
-; on entry:
-;   x: x position in bytes
-;   y: y position in lines
-;
-set_text_xy stx xpos
-            sty ypos
-            rts
-;
-; draw 3 digit number
-;
-; on entry:
-;   x: high 1 digit
-;   a: low 2 digits
-;
-draw_digits3 subroutine
-            pha
-            txa
-            and #$0f
-            jsr draw_index_char
-            pla
-            pha
-            lsr
-            lsr
-            lsr
-            lsr
-            jsr draw_index_char
-            pla
-            and #$0f
-            bpl draw_index_char ; always
-
-draw_spaces3
-            lda #10
-            jsr draw_index_char
-            lda #10
-            jsr draw_index_char
-            lda #10
-
-draw_index_char
-            ldy #>font
-            sta temp
-            asl
-            asl
-            asl
-            bcc .1
-            iny
-.1          clc
-            adc #<font
-            bcc .2
-            iny
-.2          sec
-            sbc temp
-            sta char_mod+1
-            bcs .3
-            dey
-.3          sty char_mod+2
-
-draw_char   ldx #0
-            lda ypos
-            sta ycount
-char_loop   ldy ycount
-            lda hires_table_lo,y
-            sta screenl
-            lda hires_table_hi,y
-            sta screenh
-char_mod    lda font,x
-            ldy xpos
-            sta (screenl),y
-            inc ycount
-            inx
-            cpx #7
-            bne char_loop
-            inc xpos
-            rts
-
-font        dc.b %00011110      ; 0
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00001100      ; 1
-            dc.b %00001110
-            dc.b %00001100
-            dc.b %00001100
-            dc.b %00001100
-            dc.b %00001100
-            dc.b %00011110
-
-            dc.b %00011110      ; 2
-            dc.b %00110011
-            dc.b %00110000
-            dc.b %00011100
-            dc.b %00000110
-            dc.b %00000011
-            dc.b %00111111
-
-            dc.b %00011110      ; 3
-            dc.b %00110011
-            dc.b %00110000
-            dc.b %00011100
-            dc.b %00110000
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00110011      ; 4
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00111111
-            dc.b %00110000
-            dc.b %00110000
-            dc.b %00110000
-
-            dc.b %00111111      ; 4
-            dc.b %00000011
-            dc.b %00000011
-            dc.b %00011111
-            dc.b %00110000
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00011110      ; 6
-            dc.b %00110011
-            dc.b %00000011
-            dc.b %00011111
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00111111      ; 7
-            dc.b %00110000
-            dc.b %00110000
-            dc.b %00011000
-            dc.b %00001100
-            dc.b %00001100
-            dc.b %00001100
-
-            dc.b %00011110      ; 8
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00011110
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00011110      ; 9
-            dc.b %00110011
-            dc.b %00110011
-            dc.b %00111110
-            dc.b %00110000
-            dc.b %00110011
-            dc.b %00011110
-
-            dc.b %00000000      ; <space>
-            dc.b %00000000
-            dc.b %00000000
-            dc.b %00000000
-            dc.b %00000000
-            dc.b %00000000
-            dc.b %00000000
-
-;-------------------------------------------------------------------------------
-;
-; Returns a random 8-bit number in A (0-255), modifies Y (unknown)
-; (from https://wiki.nesdev.com/w/index.php/Random_number_generator)
-;   Assumes seed0 and seed1 zpage values have been initialized.
-;   35 bytes, 69 cycles
-;
-random      subroutine
-
-            lda seed1
-            tay
-            lsr
-            lsr
-            lsr
-            sta seed1
-            lsr
-            eor seed1
-            lsr
-            eor seed1
-            eor seed0
-            sta seed1
-            tya
-            sta seed0
-            asl
-            eor seed0
-            asl
-            eor seed0
-            asl
-            asl
-            asl
-            eor seed0
-            sta seed0
-            rts
-;
-; clear primary screen to black
-;
-clear1      subroutine
-
-            ldx #0
-            txa
-.loop       sta $2000,x
-            sta $2100,x
-            sta $2200,x
-            sta $2300,x
-            sta $2400,x
-            sta $2500,x
-            sta $2600,x
-            sta $2700,x
-            sta $2800,x
-            sta $2900,x
-            sta $2a00,x
-            sta $2b00,x
-            sta $2c00,x
-            sta $2d00,x
-            sta $2e00,x
-            sta $2f00,x
-            sta $3000,x
-            sta $3100,x
-            sta $3200,x
-            sta $3300,x
-            sta $3400,x
-            sta $3500,x
-            sta $3600,x
-            sta $3700,x
-            sta $3800,x
-            sta $3900,x
-            sta $3a00,x
-            sta $3b00,x
-            sta $3c00,x
-            sta $3d00,x
-            sta $3e00,x
-            sta $3f00,x
-            inx
-            bne .loop
-            rts
-;
-; table of 128 sine values from [0, PI / 2)
-;
-;   for (uint32_t i = 0; i < 128; ++i)
-;       value = (uint8_t)(sin(M_PI / 2 * i / 128) * 256);
-;
-sine_table  hex 000306090c0f1215
-            hex 191c1f2225282b2e
-            hex 3135383b3e414447
-            hex 4a4d505356595c5f
-            hex 6164676a6d707375
-            hex 787b7e808386888b
-            hex 8e909395989b9d9f
-            hex a2a4a7a9abaeb0b2
-            hex b5b7b9bbbdbfc1c3
-            hex c5c7c9cbcdcfd1d3
-            hex d4d6d8d9dbdddee0
-            hex e1e3e4e6e7e8eaeb
-            hex ecedeeeff1f2f3f4
-            hex f4f5f6f7f8f9f9fa
-            hex fbfbfcfcfdfdfefe
-            hex feffffffffffffff
-
-            align 256
-
-div7        hex 00000000000000
-            hex 01010101010101
-            hex 02020202020202
-            hex 03030303030303
-            hex 04040404040404
-            hex 05050505050505
-            hex 06060606060606
-            hex 07070707070707
-            hex 08080808080808
-            hex 09090909090909
-            hex 0a0a0a0a0a0a0a
-            hex 0b0b0b0b0b0b0b
-            hex 0c0c0c0c0c0c0c
-            hex 0d0d0d0d0d0d0d
-            hex 0e0e0e0e0e0e0e
-            hex 0f0f0f0f0f0f0f
-            hex 10101010101010
-            hex 11111111111111
-            hex 12121212121212
-            hex 13131313131313
-            hex 14141414141414
-            hex 15151515151515
-            hex 16161616161616
-            hex 17171717171717
-            hex 18181818181818
-            hex 19191919191919
-            hex 1a1a1a1a1a1a1a
-            hex 1b1b1b1b1b1b1b
-            hex 1c1c1c1c1c1c1c
-            hex 1d1d1d1d1d1d1d
-            hex 1e1e1e1e1e1e1e
-            hex 1f1f1f1f1f1f1f
-            hex 20202020202020
-            hex 21212121212121
-            hex 22222222222222
-            hex 23232323232323
-            hex 24242424
-
-            align 256
-
-mod7        hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203040506
-            hex 00010203
-
-            align 256
-
-hires_table_lo
-            hex 0000000000000000
-            hex 8080808080808080
-            hex 0000000000000000
-            hex 8080808080808080
-            hex 0000000000000000
-            hex 8080808080808080
-            hex 0000000000000000
-            hex 8080808080808080
-            hex 2828282828282828
-            hex a8a8a8a8a8a8a8a8
-            hex 2828282828282828
-            hex a8a8a8a8a8a8a8a8
-            hex 2828282828282828
-            hex a8a8a8a8a8a8a8a8
-            hex 2828282828282828
-            hex a8a8a8a8a8a8a8a8
-            hex 5050505050505050
-            hex d0d0d0d0d0d0d0d0
-            hex 5050505050505050
-            hex d0d0d0d0d0d0d0d0
-            hex 5050505050505050
-            hex d0d0d0d0d0d0d0d0
-            hex 5050505050505050
-            hex d0d0d0d0d0d0d0d0
-
-            align 256
-
-hires_table_hi
-            hex 2024282c3034383c
-            hex 2024282c3034383c
-            hex 2125292d3135393d
-            hex 2125292d3135393d
-            hex 22262a2e32363a3e
-            hex 22262a2e32363a3e
-            hex 23272b2f33373b3f
-            hex 23272b2f33373b3f
-            hex 2024282c3034383c
-            hex 2024282c3034383c
-            hex 2125292d3135393d
-            hex 2125292d3135393d
-            hex 22262a2e32363a3e
-            hex 22262a2e32363a3e
-            hex 23272b2f33373b3f
-            hex 23272b2f33373b3f
-            hex 2024282c3034383c
-            hex 2024282c3034383c
-            hex 2125292d3135393d
-            hex 2125292d3135393d
-            hex 22262a2e32363a3e
-            hex 22262a2e32363a3e
-            hex 23272b2f33373b3f
-            hex 23272b2f33373b3f
-
-            include applz.logo.s
-            include applz.data.s
+            include title.s
+            include grid.s
+            include sound.s
+            include data.s

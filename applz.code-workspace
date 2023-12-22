@@ -1,0 +1,33 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/obj": true,
+      ".gitignore": true,
+      "dasm": true
+    },
+    "rpw65.syntax": "dasm",
+    "rpw65.columns.c1": 12,
+    "rpw65.columns.c2": 4,
+    "rpw65.columns.c3": 12,
+    "rpw65.case.lowerCaseCompletions": true
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Build Applz",
+        "type": "shell",
+        "command": "./build.sh",
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        }
+      }
+    ]
+  }
+}
