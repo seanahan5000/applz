@@ -465,8 +465,6 @@ draw_block  subroutine
 .5
             END_EVENT DrawBlock
             rts
-
-            align 256
 ;
 ; erase a single grid block, split into two parts so update_sound
 ;   can be called often enough

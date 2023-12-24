@@ -1,0 +1,6 @@
+{
+  "binDir": "obj",
+  "modules": [
+    { "src": "applz.s", "lst": "applz.lst", "bins": [ { "fileName": "applz", "addr": "0x6000" } ] }
+  ]
+}

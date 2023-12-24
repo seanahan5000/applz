@@ -1,4 +1,4 @@
-; Applz -- Copyright 2022-2023, Sean Callahan
+; Applz -- Copyright (C) 2022-2023 Sean Callahan
 
             processor 6502
 
@@ -19,8 +19,8 @@ PAGE set *
 
     mac CHECK_PAGE
         if ((*-1)/256) != (PAGE/256)
-            ; echo "### page crossing detected:",*,"-^",PAGE
-            ; err
+            echo "### page crossing detected:",*,"-^",PAGE
+            err
         endif
     endm
 
@@ -49,8 +49,6 @@ grid_size           = grid_width*grid_height
 grid_screen_width   = grid_width*3*7
 grid_border_height  = 2
 
-max_aim_dots        = 32
-
 wave_x              = 3     ; in bytes
 wave_y              = 192-24
 high_x              = wave_x
@@ -65,9 +63,6 @@ scroll_delta        = 4     ; number of lines stepped per grid scroll
 default_start_x     = 92
 default_start_y     = 192-ball_height-8
 
-min_angle           = 6
-max_angle           = 255-min_angle
-
 text_height         = 6     ; excluding line gaps
 
 ; zero page variables
@@ -77,11 +72,8 @@ xpos            = $01
 ypos            = $02
 ycount          = $03
 
-textl           = $04
-texth           = $05
-text_index      = $06
-text_length     = $07
-top_digit       = $08
+top_digit       = $04
+skip_delay      = $05   ; briefly used during title screen
 
 input_mode      = $10   ; 0: keyboard, 1: paddle
 difficulty      = $11
@@ -122,20 +114,18 @@ max_ball_y      = $2c
 grid_left       = $30
 grid_dx         = $31
 grid_top        = $32
-grid_col        = $33
-grid_row        = $34
+grid_row        = $33
 
-block_index     = $35
-block_type      = $36
-block_color     = $37
-block_top       = $38
-block_left      = $39
-block_mid       = $3a
-block_bot       = $3b
+block_index     = $34
+block_color     = $35
+block_top       = $36
+block_left      = $37
+block_mid       = $38
+block_bot       = $39
 
-block_hit0      = $3c
-block_hit1      = $3d
-block_appl_hit  = $3e
+block_hit0      = $3a
+block_hit1      = $3b
+block_appl_hit  = $3c
 
 wave_index      = $40
 wave_bcd0       = $41
@@ -173,7 +163,6 @@ dy_int          = $1700
 block_grid      = $1800 ; grid_size bytes used
 block_counts    = $1880 ; grid_size bytes used
 
-; TODO: use correct abbreviations
 keyboard        = $C000
 unstrobe        = $C010
 click           = $C030
@@ -186,14 +175,6 @@ hires           = $C057
 pbutton0        = $C061
 
 PREAD           = $FB1E
-
-; TODO:
-;   * MIT license header on files
-;   * README file, including screen capture image, instructions, trivia
-;   * use command key to jump larger in keyboard mode
-;   ? clamp keyboard aiming on edge of screen
-;   ? difficulty setting
-;       - shorten up aiming dots for more difficulty
 
             org $6000
 
@@ -286,6 +267,8 @@ next_wave_mode subroutine
 .3          stx wave_mag
 
 first_wave_mode subroutine
+
+            jsr draw_wave_best
 
             ; draw wave number
 
@@ -399,7 +382,7 @@ game_over   subroutine
 
 .1          jsr animate_logo
             lda keyboard
-            bpl .3
+            bpl .4
             and #$5f            ; force upper case and remove high bit
             bit unstrobe
             cmp #"S"
@@ -422,7 +405,7 @@ game_over   subroutine
             beq .to_restart
 
 .new_mode   stx input_mode
-.3          lda input_mode
+.4          lda input_mode
             beq .1
 
 .joy_mode   lda pbutton0
@@ -434,8 +417,8 @@ game_over   subroutine
             bpl .1
 
 .to_restart jsr abort_logo
-.4          jsr animate_logo
-            bcs .4
+.5          jsr animate_logo
+            bcs .5
             jsr close_screen_grid
             jmp restart
 
@@ -486,16 +469,34 @@ aiming_mode subroutine
             jsr animate_logo
 
             lda keyboard
-            bpl .1
+            bpl .5
             bit unstrobe
             and #$5f            ; force upper case and remove high bit
-            beq .running        ; <space> forced to upper case
-            cmp #"S"
-            bne .1
-            jsr toggle_sound
-            jmp .2
+            bne .1              ; <space> forced to upper case
+            jmp .running
 
-.1          ldx #0
+.1          cmp #"S"
+            bne .2
+            jsr toggle_sound
+            jmp .5
+
+.2          cmp #"D"
+            bne .4
+.new_diff   ldx wave_index      ; only allowed on first wave
+            dex
+            bne .loop1
+            jsr erase_dots
+            ldx difficulty
+            inx
+            cpx #3
+            bne .3
+            ldx #0
+.3          stx difficulty
+            lda #0
+            sta dot_count
+            jmp .loop2
+
+.4          ldx #0
             cmp #"K"
             beq .new_mode
             inx
@@ -508,57 +509,73 @@ aiming_mode subroutine
             cmp #$15            ; right arrow
             beq .key_right
             cmp #$0d            ; return
-            bne .2
+            bne .5
             beq .running        ; always
 
 .new_mode   stx input_mode
             txa
             bne .joy_mode
-            ldy #$80
+            lda #$80
             bne .common         ; always
 
-.2          ldx input_mode
+.5          ldx input_mode
             beq .loop2
 
 .joy_mode   lda pbutton0        ; check for paddle 0 button press
             tax
             eor pbutton0_prev
-            bpl .3
+            bpl .6
             stx pbutton0_prev
             txa
             bmi .running        ; if newly down, start running
-.3          ldx #0
+.6          ldx #0
             jsr PREAD           ; read paddle 0 value
-            cpy #min_angle      ; clamp value to [2,253]
-            bcs .4
-            ldy #min_angle
-.4          cpy #max_angle
-            bcc .5
-            ldy #max_angle
-.5          cpy angle
-            beq .loop2          ; loop until something changes
-            bne .common         ; always
+            tya
+            ldx difficulty
+            cmp min_angles,x    ; clamp value
+            bcs .7
+            lda min_angles,x
+.7          cmp max_angles,x
+            bcc .8
+            lda max_angles,x
+.8          cmp angle
+            bne .common
+            jmp .loop2          ; loop until something changes
 
-.key_left   ldy angle
-            dey
-            cpy #min_angle
+.key_left   lda #1
+            ldx difficulty
+            ldy pbutton0
+            bpl .9
+            lda #8
+.9          sta temp
+            lda angle
+            sec
+            sbc temp
+            bcc .10
+            cmp min_angles,x
             bcs .common
-            iny
-            bcc .common         ; always
+.10         lda min_angles,x
+            bpl .common         ; always
 
-.key_right  ldy angle
-            iny
-            cpy #max_angle+1
+.key_right  lda #1
+            ldx difficulty
+            ldy pbutton0
+            bpl .11
+            lda #8
+.11         clc
+            adc angle
+            bcs .12
+            cmp max_angles,x
             bcc .common
-            dey
+.12         lda max_angles,x
 
-.common     sty angle
+.common     sta angle
             jsr random          ; update random number on input change
             jmp .loop1
 
 .running    jsr abort_logo
-.6          jsr animate_logo
-            bcs .6
+.13         jsr animate_logo
+            bcs .13
             ; fall through
 
 ;=======================================
@@ -1421,8 +1438,9 @@ update_block subroutine
 ;
 ; divide by 21 table to convert x position into grid column
 ;
-            align 256
+            align 128
 grid_x_table
+            SET_PAGE
             ds  block_width,0
             ds  block_width,1
             ds  block_width,2
@@ -1432,11 +1450,13 @@ grid_x_table
             ds  block_width,6
             ds  block_width,7
             ds  block_width,8
+            CHECK_PAGE
 ;
 ; divide by 20 * grid_width table to convert y position into grid row offset
 ;
-            align 256
+            align 128
 grid_y_table
+            SET_PAGE
             ds  block_height+grid_screen_top,0*grid_width
             ds  block_height,1*grid_width
             ds  block_height,2*grid_width
@@ -1447,6 +1467,7 @@ grid_y_table
             ds  block_height,7*grid_width
             ds  block_height,8*grid_width
             ds  block_height,9*grid_width
+            CHECK_PAGE
 
 ;=======================================
 ; Aiming dots logic
@@ -1620,7 +1641,9 @@ update_dots subroutine
             ldx appl_index
 
             inx
-            cpx #max_aim_dots
+            txa
+            ldy difficulty
+            cmp max_aim_dots,y
             bcs .5
             stx appl_index
             jmp .loop1
@@ -1636,7 +1659,7 @@ update_dots subroutine
 
 ; throttle to maximum number of dots
 
-.7          lda #max_aim_dots
+.7          lda max_aim_dots+0  ; always use highest value here
             sec
             sbc dot_count
             tax
@@ -1647,6 +1670,10 @@ update_dots subroutine
             dex
             bne .8
 .10         rts
+
+min_angles  dc.b 6,6,16
+max_angles  dc.b 255-6,255-6,255-16
+max_aim_dots dc.b 32,32,10
 
 ;
 ; erase all previously drawn aiming dots
@@ -1678,7 +1705,7 @@ eor_dot     subroutine
             lda #dot_height
             sta ycount
             ldy mod7,x
-            ldx dots_lo,y
+            ldx dots_offs,y
 .loop       ldy ypos
             lda hires_table_lo,y
             sta screenl
@@ -1700,15 +1727,9 @@ eor_dot     subroutine
             bne .loop
             rts
 
-dots_lo     dc.b <dot0
-            dc.b <dot1
-            dc.b <dot2
-            dc.b <dot3
-            dc.b <dot4
-            dc.b <dot5
-            dc.b <dot6
-
-            align 256
+dots_offs   dc.b 0,6,12
+            dc.b 18,24,30
+            dc.b 36
 
 dot0        dc.b %00000000, %00000000
             dc.b %00001100, %00000000
@@ -1751,8 +1772,6 @@ dot6        dc.b %00000000, %00000000
 ; simple erase/draw:
 ;
 ;   373 * 2 = 746
-
-            align 256               ; to prevent page crossings
 
 hit_move_appl subroutine
 
@@ -2105,7 +2124,6 @@ move_appl_dr subroutine
 .exit       END_EVENT MoveDR
             rts
 
-            align 256               ; to prevent page crossings
 ;-------------------------------------------------------------------------------
 ;
 ; eor a ball shape without movement

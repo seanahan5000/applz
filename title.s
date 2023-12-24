@@ -19,54 +19,74 @@ title_screen subroutine
             sta hires
             sta graphics
 
+            lda #0
+            sta skip_delay
+            bit unstrobe
+
             ldy #2
             jsr delay
 
             ldx #0
             ldy #7
-            jsr scroll_presents
-
-            ldy #6
-            jsr delay
-
-            ldx #1
-            ldy #14
-            jsr scroll_presents
+            jsr draw_presents
 
             ldy #8
             jsr delay
 
+            ldx #1
+            ldy #14
+            jsr draw_presents
+
+            ldy #12
+            jsr delay
+
+            jsr draw_logo
+            lda skip_delay
+            bne .3
+
             lda #8
             jsr reset_logo
-            jsr draw_logo
 .2          jsr animate_logo
             bcc .3
-            bit keyboard
-            bpl .2
+            jsr check_skip
+            lda skip_delay
+            beq .2
             jsr abort_logo
             jmp .2
 .3          rts
 
-;-----------------------------------------------------------
-;
-; on entry:
-;   x: 0 (callaco) or 1 (presents)
-;   y: end scroll line
-;
-scroll_presents subroutine
-            stx xpos
-            sty .mod+1
-            ldy #191
-.1          sty ycount
-            ldx xpos
-            jsr draw_presents
-            lda #$08
+delay       subroutine
+            lda skip_delay
+            bne .1
+            jsr check_skip
+            lda #0
             jsr wait
-            ldy ycount
             dey
-.mod        cpy #7
-            bcs .1
+            bne delay
+.1          rts
+
+check_skip  subroutine
+            lda pbutton0
+            bmi .1
+            bit keyboard
+            bpl .2
+            bit unstrobe
+.1          inc skip_delay
+.2          rts
+
+wait        subroutine
+            sec
+            SET_PAGE
+.1          pha
+.2          sbc #1
+            bne .2
+            pla
+            sbc #1
+            bne .1
+            CHECK_PAGE
             rts
+
+;-----------------------------------------------------------
 ;
 ; on entry:
 ;   x: 0 (callaco) or 1 (presents)
@@ -139,7 +159,7 @@ close_screen_grid subroutine
             rts
 
 open_screen_grid subroutine
-            ldy #0          ;1          ; skip top line
+            ldy #0
 .1          sty ypos
             jsr erase_grid_row
 
@@ -440,6 +460,8 @@ update_digits3 subroutine
             tya
             pha
             jmp draw_digits
+
+            align 128
 
 erase_digits3 subroutine
             ldx xpos
@@ -1116,29 +1138,6 @@ logo_z      hex 00000000
             hex 20552A01
             hex 00000000
             hex 00000000
-
-;-----------------------------------------------------------
-;
-; on entry:
-;   y: repetitions of WAIT #$00
-;
-delay       subroutine
-            lda #0
-            jsr wait
-            dey
-            bne delay
-            rts
-
-wait        sec
-            SET_PAGE
-.1          pha
-.2          sbc #1
-            bne .2
-            pla
-            sbc #1
-            bne .1
-            CHECK_PAGE
-            rts
 
 ;-----------------------------------------------------------
 ;
