@@ -31,7 +31,3 @@ Press and hold the fire button/key to speed up apple motion.
 * The classic Apple II game Raster Blaster was the inspiration for the in-game ball/apple shape and color apple graphic, with a minor tweak to the stem shape.
 * Apple drawing performance was greatly improved by using a technique also used by Raster Blaster.  Instead of XOR-ing a ball at its old position and then XOR-ing it again at its new position, a single image that is the combination of the two positions is XOR-ed in one operation.
 * The name Callaco is an homage to Budgeco.
-
-#### Assembling Code
-
-```./dasm applz.s -lobj/applz.lst -f3 -oobj/applz```
