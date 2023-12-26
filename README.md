@@ -20,7 +20,7 @@ Applz is remake/demake of the iPhone game Ballz.  It was written by Sean Callaha
 * Paddle 0 - aim and fire apples in joystick mode
 * Left/Right arrows - aim apples in keyboard mode
 * Apple/command key - with arrows, move left/right in larger steps
-* <SPACE>/<RETURN> - fire apples in keyboard mode
+* SPACE/RETURN - fire apples in keyboard mode
 * D - Cycle through difficulty levels (easy/normal/hard)
 * S - Toggle sound on/off
 
