@@ -5,7 +5,9 @@ if ! [[ -d obj ]]; then
   mkdir obj
 fi
 
-./dasm applz.s -lobj/applz.lst -f3 -oobj/applz
+cd "src"
+../dasm applz.s -l../obj/applz.lst -f3 -o../obj/applz
+cd ".."
 
 #---------------------------------------
 # Copy all project files

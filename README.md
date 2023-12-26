@@ -24,13 +24,13 @@ Applz is remake/demake of the iPhone game Ballz.  It was written by Sean Callaha
 * D - Cycle through difficulty levels (easy/normal/hard)
 * S - Toggle sound on/off
 
-Press and hold fire button/key to speed up apple motion.
+Press and hold the fire button/key to speed up apple motion.
 
 #### Development Notes
 
 * The classic Apple II game Raster Blaster was the inspiration for the in-game ball/apple shape and color apple graphic, with a minor tweak to the stem shape.
-* Apple drawing performance was greatly improved by using a technique used by Raster Blaster.  Instead of XOR-ing a ball at its old position and then doing it again at its new position, a single image that is the combination of the two positions is XOR-ed in one operation.
-* Callaco is an homage to Budgeco.
+* Apple drawing performance was greatly improved by using a technique also used by Raster Blaster.  Instead of XOR-ing a ball at its old position and then XOR-ing it again at its new position, a single image that is the combination of the two positions is XOR-ed in one operation.
+* The name Callaco is an homage to Budgeco.
 
 #### Assembling Code
 
