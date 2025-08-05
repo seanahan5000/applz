@@ -14,7 +14,12 @@
     "rpw65.columns.c1": 12,
     "rpw65.columns.c2": 4,
     "rpw65.columns.c3": 12,
-    "rpw65.case.lowerCaseCompletions": true
+    "rpw65.case.lowerCaseCompletions": true,
+    "rpw65.showCodeBytes": true,
+    "rpw65.showCycleCounts": false,
+    "workbench.colorCustomizations": {
+      "editor.background": "#000000"
+    }
   },
   "tasks": {
     "version": "2.0.0",

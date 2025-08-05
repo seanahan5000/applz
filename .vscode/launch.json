@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "rpw65",
+            "request": "launch",
+            "name": "Launch RPW Debugger",
+            "stopOnEntry": true
+        },
+        {
+            "type": "rpw65",
+            "request": "attach",
+            "name": "Attach RPW Debugger",
+            "stopOnEntry": true
+        }
+    ]
+}

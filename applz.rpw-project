@@ -1,7 +1,15 @@
 {
+  "settings": {
+    "syntax": "dasm",
+    "upperCase": false,
+    "tabStops": [ 12, 16, 28 ]
+  },
   "srcDir": "src",
   "binDir": "obj",
   "modules": [
-    { "src": "applz.s", "lst": "applz.lst", "bins": [ { "fileName": "applz", "addr": "0x6000" } ] }
+    { "src": "applz.s", "save": "applz" }
+  ],
+  "preloads": [
+    { "bins": [{ "name": "applz", "address": "0x6000" }] }
   ]
 }
