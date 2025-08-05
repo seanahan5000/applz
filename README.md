@@ -1,6 +1,6 @@
 # Applz
 
-Applz is remake/demake of the iPhone game Ballz.  It was written by Sean Callahan in 2022-2023 using VSCode with the RPW65 extension, the DASM assembler, and the yet-unreleased RPW debugger and emulator.
+Applz is remake/demake of the iOS game Ballz.  It was written by Sean Callahan in 2022-23 using VSCode with the RPW65 extension, the DASM assembler, and the yet-unreleased RPW debugger and emulator.
 
 <img src="applz.png"/>
 
@@ -29,5 +29,5 @@ Press and hold the fire button/key to speed up apple motion.
 #### Development Notes
 
 * The classic Apple II game Raster Blaster was the inspiration for the in-game ball/apple shape and color apple graphic, with a minor tweak to the stem shape.
-* Apple drawing performance was greatly improved by using a technique also used by Raster Blaster.  Instead of XOR-ing a ball at its old position and then XOR-ing it again at its new position, a single image that is the combination of the two positions is XOR-ed in one operation.
+* Apple drawing performance was greatly improved by using a technique also used by Raster Blaster.  Instead of EOR-ing a ball at its old position and then EOR-ing it again at its new position, a single image that is the combination of the two positions is EOR-ed in one pass.
 * The name Callaco is an homage to Budgeco.

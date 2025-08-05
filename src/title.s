@@ -118,21 +118,19 @@ draw_presents subroutine
             bne .1
 .3          rts
 
-.offsets    dc.b 0,60,120
+.offsets    dc.b 0,50,100
 
 callaco     hex 00787933307067670F00
             hex 00181833303066600C00
             hex 00187833307067600C00
             hex 00181833303066600C00
             hex 00781973733366670F00
-            hex 00000000000000000000
 
 presents    hex 401F1F3E3E3E667C7901
             hex 4019330606066E301800
             hex 401F1F1E3E1E7E307801
             hex 40013306300676304001
             hex 4001333E3E3E66307801
-            hex 00000000000000000000
 
 ;-----------------------------------------------------------
 
@@ -283,7 +281,7 @@ game_over_image
             hex 94000000000000000000000094
             hex 94000000000000000000000094
             hex 94000000000000000000000094
-            hex 9470674F7F73037C1973730394
+            hex 9470674F7F71037C1973730394
             hex 9430604C1933004C1933300694
             hex 9430674F1973014C1973710394
             hex 9430664C1933004C1933300694
@@ -298,7 +296,7 @@ game_over_image
 
 ;-----------------------------------------------------------
 
-draw_wave_best subroutine
+draw_wave_high subroutine
 
             ldx #0
             ldy #wave_y
@@ -308,7 +306,7 @@ draw_wave_best subroutine
             lda hires_table_hi,y
             sta screenh
             ldy #wave_x
-.2          lda wave_best,x
+.2          lda wave_high,x
             sta (screenl),y
             inx
             iny
@@ -320,11 +318,11 @@ draw_wave_best subroutine
             bne .1
             rts
 
-wave_best   hex 30667C197363
+wave_high   hex 30667C197363
             hex 30664C193360
             hex 30667C197301
             hex 30664C193360
-            hex 707F4C797163
+            hex 703F4C797163
             hex 000000000000
             hex 000000000000
             hex 000000000000

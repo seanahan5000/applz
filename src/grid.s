@@ -35,7 +35,7 @@ clear_grid  subroutine
 ;
 ; scroll down grid block and block count tables
 ;
-scroll_grid   subroutine
+scroll_grid subroutine
 
             ldy #grid_size-grid_width-1
 .loop1      lda block_grid,y

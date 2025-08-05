@@ -1,4 +1,4 @@
-; Applz -- Copyright (C) 2022-2023 Sean Callahan
+; Applz -- Copyright (C) 2022-23 Sean Callahan
 
             processor 6502
 
@@ -176,6 +176,12 @@ pbutton0        = $C061
 
 PREAD           = $FB1E
 
+; X tweak W and M characters
+; - put fast screen clear back in with comments
+;   (not clear gaps, Bruce Artwick of Sublogic)
+; *** cap ball count at 255 but allow wave up to 999
+; *** (wave_index might still cap at 255)
+
             org $6000
 
 start
@@ -268,7 +274,7 @@ next_wave_mode subroutine
 
 first_wave_mode subroutine
 
-            jsr draw_wave_best
+            jsr draw_wave_high
 
             ; draw wave number
 
@@ -1402,6 +1408,7 @@ hit_block   subroutine
             bne .1
             lda #0
             sta block_grid,y
+
             jsr clear_block_bit
 .1          lda block_hit0
             bpl .2
@@ -1438,7 +1445,7 @@ update_block subroutine
 ;
 ; divide by 21 table to convert x position into grid column
 ;
-            align 128
+            align 256
 grid_x_table
             SET_PAGE
             ds  block_width,0
@@ -1454,7 +1461,7 @@ grid_x_table
 ;
 ; divide by 20 * grid_width table to convert y position into grid row offset
 ;
-            align 128
+            align 256
 grid_y_table
             SET_PAGE
             ds  block_height+grid_screen_top,0*grid_width
